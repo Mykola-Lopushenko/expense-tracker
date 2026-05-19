@@ -4,14 +4,14 @@ import "./App.css";
 function App() {
   const [expenses, setExpenses] = useState([]);
   const [message, setMessage] = useState("");
+  const [editingId, setEditingId] = useState(null);
+  const [detailsId, setDetailsId] = useState(null);
 
   const [form, setForm] = useState({
     description: "",
     amount: "",
     category: ""
   });
-
-  const [editingId, setEditingId] = useState(null);
 
   useEffect(() => {
     fetch("http://localhost:5000/expenses")
@@ -24,6 +24,11 @@ function App() {
     setEditingId(null);
   };
 
+  const showMessage = (text) => {
+    setMessage(text);
+    setTimeout(() => setMessage(""), 2000);
+  };
+
   const addExpense = async () => {
     if (!form.description || !form.amount || !form.category) {
       alert("Required: Please fill in all fields.");
@@ -32,20 +37,23 @@ function App() {
 
     const res = await fetch("http://localhost:5000/expenses", {
       method: "POST",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify(form)
     });
 
     const newExpense = await res.json();
+
     setExpenses([...expenses, newExpense]);
     clearForm();
-
-    setMessage("Expense added successfully");
-    setTimeout(() => setMessage(""), 2000);
+    showMessage("Expense added successfully");
   };
 
   const startEdit = (expense) => {
     setEditingId(expense.id);
+    setDetailsId(null);
+
     setForm({
       description: expense.description,
       amount: expense.amount,
@@ -61,7 +69,9 @@ function App() {
 
     await fetch(`http://localhost:5000/expenses/${editingId}`, {
       method: "PUT",
-      headers: { "Content-Type": "application/json" },
+      headers: {
+        "Content-Type": "application/json"
+      },
       body: JSON.stringify(form)
     });
 
@@ -79,65 +89,98 @@ function App() {
     );
 
     clearForm();
-
-    setMessage("Expense updated successfully");
-    setTimeout(() => setMessage(""), 2000);
+    showMessage("Expense updated successfully");
   };
 
   const deleteExpense = async (id) => {
-    if (!window.confirm("Deleting this expense cannot be undone. Continue?")) return;
+    if (!window.confirm("Deleting this expense cannot be undone. Continue?")) {
+      return;
+    }
 
     await fetch(`http://localhost:5000/expenses/${id}`, {
       method: "DELETE"
     });
 
     setExpenses(expenses.filter(expense => expense.id !== id));
-
-    setMessage("Expense deleted successfully");
-    setTimeout(() => setMessage(""), 2000);
+    setDetailsId(null);
+    showMessage("Expense deleted successfully");
   };
 
-  const total = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+  const total = expenses.reduce(
+    (sum, expense) => sum + Number(expense.amount),
+    0
+  );
+
+  const selectedDetails = expenses.find(expense => expense.id === detailsId);
 
   return (
     <div className="app">
       <h1>Expense Tracker</h1>
+      <p className="subtitle">Track expenses and see total spending instantly.</p>
+
+      <ul className="feature-info">
+        <li>Track daily expenses</li>
+        <li>Monitor total spending</li>
+        <li>Edit expenses anytime</li>
+      </ul>
 
       <div className="form">
-        <input
-          placeholder="Description"
-          value={form.description}
-          onChange={e => setForm({ ...form, description: e.target.value })}
-        />
+        <div className="form-row">
+          <label>
+            Description *
+            <input
+              placeholder="Example: Coffee"
+              value={form.description}
+              onChange={e =>
+                setForm({ ...form, description: e.target.value })
+              }
+            />
+          </label>
 
-        <input
-          placeholder="Amount"
-          type="number"
-          value={form.amount}
-          onChange={e => setForm({ ...form, amount: e.target.value })}
-        />
+          <label>
+            Amount *
+            <input
+              placeholder="Example: 9.99"
+              type="number"
+              value={form.amount}
+              onChange={e =>
+                setForm({ ...form, amount: e.target.value })
+              }
+            />
+          </label>
 
-        <select
-          value={form.category}
-          onChange={e => setForm({ ...form, category: e.target.value })}
-        >
-          <option value="">Select Category</option>
-          <option value="Food">Food</option>
-          <option value="Groceries">Groceries</option>
-          <option value="Transport">Transport</option>
-          <option value="Other">Other</option>
-        </select>
+          <label>
+            Category *
+            <select
+              value={form.category}
+              onChange={e =>
+                setForm({ ...form, category: e.target.value })
+              }
+            >
+              <option value="">Select Category</option>
+              <option value="Food">Food</option>
+              <option value="Groceries">Groceries</option>
+              <option value="Transport">Transport</option>
+              <option value="Other">Other</option>
+            </select>
+          </label>
+        </div>
+
+        <p className="required-note">* Required fields</p>
 
         {editingId ? (
-          <>
-            <button onClick={saveEdit}>Save Changes</button>
-            <button onClick={clearForm}>Cancel</button>
-          </>
+          <div className="button-row">
+            <button className="primary" onClick={saveEdit}>
+              Save Changes
+            </button>
+            <button className="secondary" onClick={clearForm}>
+              Cancel
+            </button>
+          </div>
         ) : (
-          <>
-            <button onClick={addExpense}>Add Expense</button>
-            <button onClick={clearForm}>Cancel</button>
-          </>
+          <button className="primary" onClick={addExpense}>
+            Add Expense
+          </button>
         )}
       </div>
 
@@ -146,17 +189,71 @@ function App() {
       <div className="expense-list">
         {expenses.map(expense => (
           <div className="expense-item" key={expense.id}>
-            <span>
-              {expense.description} - ${Number(expense.amount).toFixed(2)} ({expense.category})
-            </span>
+            <div className="expense-top">
+              <span>
+                {expense.description} - ${Number(expense.amount).toFixed(2)}
+              </span>
 
-            <button onClick={() => startEdit(expense)}>Edit</button>
-            <button onClick={() => deleteExpense(expense.id)}>Delete</button>
+              <div className="expense-actions">
+                <button
+                  className="details-btn"
+                  onClick={() => setDetailsId(expense.id)}
+                >
+                  Details
+                </button>
+
+                <button
+                  className="secondary"
+                  onClick={() => startEdit(expense)}
+                >
+                  Edit
+                </button>
+
+                <button
+                  className="delete-btn"
+                  onClick={() => deleteExpense(expense.id)}
+                >
+                  Delete
+                </button>
+              </div>
+            </div>
           </div>
         ))}
       </div>
 
-      <h2>Total: ${total.toFixed(2)}</h2>
+      {selectedDetails && (
+        <div className="details-box">
+          <h3>Expense Details</h3>
+          <p>
+            <strong>Description:</strong> {selectedDetails.description}
+          </p>
+          <p>
+            <strong>Amount:</strong> ${Number(selectedDetails.amount).toFixed(2)}
+          </p>
+          <p>
+            <strong>Category:</strong> {selectedDetails.category}
+          </p>
+        <div className="details-actions">
+          <button
+            className="primary"
+            onClick={() => startEdit(selectedDetails)}
+          >
+            Edit This Expense
+          </button>
+
+          <button
+            className="secondary"
+            onClick={() => setDetailsId(null)}
+          >
+            Close Details
+          </button>
+        </div>
+        </div>
+      )}
+
+      <div className="total-box">
+        Total: ${total.toFixed(2)}
+      </div>
     </div>
   );
 }

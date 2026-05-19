@@ -41,7 +41,7 @@ app.put("/expenses/:id", (req, res) => {
   const { description, amount, category } = req.body;
 
   expenses = expenses.map(e =>
-    e.id === id ? { ...e, description, amount, category } : e
+    e.id === id ? { ...e, description, amount: Number(amount), category } : e
   );
 
   res.json({ message: "Updated" });
