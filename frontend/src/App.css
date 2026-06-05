@@ -163,3 +163,19 @@ button:hover {
   border-radius: 20px;
   padding: 20px;
 }
+
+.microservice-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 16px 0;
+}
+
+.summary {
+  background: white;
+  border: 1px solid #ddd;
+  border-radius: 12px;
+  padding: 15px;
+  margin: 15px 0;
+}
+
