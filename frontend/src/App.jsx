@@ -3,7 +3,9 @@ import "./App.css";
 
 function App() {
   const [expenses, setExpenses] = useState([]);
+  const [summary, setSummary] = useState(null);
   const [message, setMessage] = useState("");
+
 
   const [form, setForm] = useState({
     description: "",
@@ -97,6 +99,15 @@ function App() {
     setTimeout(() => setMessage(""), 2000);
   };
 
+  const getSummary = async () => {
+    try {
+      const res = await fetch("http://localhost:5000/expenses/summary");
+      const data = await res.json();
+      setSummary(data);
+    } catch (error) {
+      alert("Could not get expense summary.");
+    }
+  };
   const total = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
 
   return (
@@ -155,6 +166,33 @@ function App() {
           </div>
         ))}
       </div>
+      
+      <button onClick={getSummary}>Get Data Summary</button>
+
+      {summary && (
+        <div className="summary">
+          <h2>Data Summary Microservice</h2>
+
+          <p>
+            Average Expense: $
+            {summary.descriptive_statistics?.amount?.mean?.toFixed(2)}
+          </p>
+
+          <p>
+            Minimum Expense: $
+            {summary.descriptive_statistics?.amount?.min?.toFixed(2)}
+          </p>
+
+          <p>
+            Maximum Expense: $
+            {summary.descriptive_statistics?.amount?.max?.toFixed(2)}
+          </p>
+
+          <p>
+            Missing Amount Values: {summary.check_missing?.amount}
+          </p>
+        </div>
+      )}
 
       <h2>Total: ${total.toFixed(2)}</h2>
     </div>

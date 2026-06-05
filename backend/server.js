@@ -1,6 +1,7 @@
 
 const express = require("express");
 const cors = require("cors");
+const axios = require("axios");
 
 const app = express();
 app.use(cors());
@@ -52,6 +53,24 @@ app.delete("/expenses/:id", (req, res) => {
   const id = Number(req.params.id);
   expenses = expenses.filter(e => e.id !== id);
   res.json({ message: "Deleted" });
+});
+
+app.get("/expenses/summary", async (req, res) => {
+  try {
+    const response = await axios.post("http://127.0.0.1:5001/api/summary", {
+      data: expenses.map(expense => ({
+        description: expense.description,
+        amount: expense.amount,
+        category: expense.category
+      })),
+      actions: ["descriptive_statistics", "check_missing"]
+    });
+
+    res.json(response.data);
+  } catch (error) {
+    console.error(error.message);
+    res.status(500).json({ error: "Failed to get expense summary" });
+  }
 });
 
 app.listen(5000, () => {
