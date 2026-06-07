@@ -8,10 +8,15 @@ function App() {
   const [monthlyReport, setMonthlyReport] = useState(null);
   const [searchFilter, setSearchFilter] = useState(null);
   const [searchTerm, setSearchTerm] = useState("Food");
+  const [period, setPeriod] = useState("all");
   const [message, setMessage] = useState("");
 
   const [editingId, setEditingId] = useState(null);
   const [detailsId, setDetailsId] = useState(null);
+
+  const [selectedDate, setSelectedDate] = useState(
+    new Date().toISOString().split("T")[0]
+  );
 
   const [form, setForm] = useState({
     description: "",
@@ -20,10 +25,15 @@ function App() {
   });
 
   useEffect(() => {
-    fetch("http://localhost:5000/expenses")
+    const url =
+      period === "date"
+        ? `http://localhost:5000/expenses?period=date&date=${selectedDate}`
+        : `http://localhost:5000/expenses?period=${period}`;
+
+    fetch(url)
       .then(res => res.json())
       .then(data => setExpenses(data));
-  }, []);
+  }, [period, selectedDate]);
 
   const clearForm = () => {
     setForm({ description: "", amount: "", category: "" });
@@ -33,6 +43,14 @@ function App() {
   const showMessage = (text) => {
     setMessage(text);
     setTimeout(() => setMessage(""), 2000);
+  };
+
+  const closeAllPanels = () => {
+    setDetailsId(null);
+    setSummary(null);
+    setBudgetAlert(null);
+    setMonthlyReport(null);
+    setSearchFilter(null);
   };
 
   const addExpense = async () => {
@@ -51,14 +69,17 @@ function App() {
 
     const newExpense = await res.json();
 
-    setExpenses([...expenses, newExpense]);
+    if (period === "all" || period === "today") {
+      setExpenses([newExpense, ...expenses]);
+    }
+
     clearForm();
     showMessage("Expense added successfully");
   };
 
   const startEdit = (expense) => {
+    closeAllPanels();
     setEditingId(expense.id);
-    setDetailsId(null);
 
     setForm({
       description: expense.description,
@@ -73,7 +94,7 @@ function App() {
       return;
     }
 
-    await fetch(`http://localhost:5000/expenses/${editingId}`, {
+    const res = await fetch(`http://localhost:5000/expenses/${editingId}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json"
@@ -81,16 +102,11 @@ function App() {
       body: JSON.stringify(form)
     });
 
+    const updatedExpense = await res.json();
+
     setExpenses(
       expenses.map(expense =>
-        expense.id === editingId
-          ? {
-              ...expense,
-              description: form.description,
-              amount: Number(form.amount),
-              category: form.category
-            }
-          : expense
+        expense.id === editingId ? updatedExpense : expense
       )
     );
 
@@ -108,19 +124,20 @@ function App() {
     });
 
     setExpenses(expenses.filter(expense => expense.id !== id));
-    setDetailsId(null);
+    closeAllPanels();
     showMessage("Expense deleted successfully");
   };
 
   const getSummary = async () => {
     try {
-      const res = await fetch("http://localhost:5000/expenses/summary");
+      closeAllPanels();
+
+      const res = await fetch(
+        `http://localhost:5000/expenses/summary?period=${period}`
+      );
       const data = await res.json();
 
       setSummary(data);
-      setBudgetAlert(null);
-      setMonthlyReport(null);
-      setSearchFilter(null);
     } catch (error) {
       alert("Could not get expense summary.");
     }
@@ -128,13 +145,15 @@ function App() {
 
   const getBudgetAlert = async () => {
     try {
-      const res = await fetch("http://localhost:5000/expenses/budget-alert?budget=250");
+      closeAllPanels();
+
+      const res = await fetch(
+        `http://localhost:5000/expenses/budget-alert?budget=1000&period=${period}&date=${selectedDate}`
+      );
+
       const data = await res.json();
 
       setBudgetAlert(data);
-      setSummary(null);
-      setMonthlyReport(null);
-      setSearchFilter(null);
     } catch (error) {
       alert("Could not get budget alert.");
     }
@@ -142,13 +161,15 @@ function App() {
 
   const getMonthlyReport = async () => {
     try {
-      const res = await fetch("http://localhost:5000/expenses/monthly-report");
+      closeAllPanels();
+
+      const res = await fetch(
+        `http://localhost:5000/expenses/monthly-report?period=${period}`
+      );
+
       const data = await res.json();
 
       setMonthlyReport(data);
-      setSummary(null);
-      setBudgetAlert(null);
-      setSearchFilter(null);
     } catch (error) {
       alert("Could not get monthly report.");
     }
@@ -156,18 +177,28 @@ function App() {
 
   const getSearchFilter = async () => {
     try {
+      closeAllPanels();
+
       const res = await fetch(
-        `http://localhost:5000/expenses/search-filter?search=${encodeURIComponent(searchTerm)}`
+        `http://localhost:5000/expenses/search-filter?search=${encodeURIComponent(searchTerm)}&period=${period}`
       );
+
       const data = await res.json();
 
       setSearchFilter(data);
-      setSummary(null);
-      setBudgetAlert(null);
-      setMonthlyReport(null);
     } catch (error) {
       alert("Could not search and filter expenses.");
     }
+  };
+
+  const openDetails = (id) => {
+    closeAllPanels();
+    setDetailsId(id);
+  };
+
+  const changePeriod = (newPeriod) => {
+    closeAllPanels();
+    setPeriod(newPeriod);
   };
 
   const selectedDetails = expenses.find(expense => expense.id === detailsId);
@@ -183,6 +214,24 @@ function App() {
         <li>Monitor total spending</li>
         <li>Edit expenses anytime</li>
       </ul>
+
+      <div className="period-buttons">
+        <button onClick={() => changePeriod("all")}>All</button>
+        <button onClick={() => changePeriod("today")}>Today</button>
+        <button onClick={() => changePeriod("week")}>This Week</button>
+        <button onClick={() => changePeriod("month")}>This Month</button>
+      </div>
+
+      <div className="date-filter">
+        <input
+          type="date"
+          value={selectedDate}
+          onChange={e => {
+            setSelectedDate(e.target.value);
+            changePeriod("date");
+          }}
+        />
+      </div>
 
       <div className="form">
         <div className="form-row">
@@ -251,7 +300,7 @@ function App() {
               <div className="expense-actions">
                 <button
                   className="details-btn"
-                  onClick={() => setDetailsId(expense.id)}
+                  onClick={() => openDetails(expense.id)}
                 >
                   Details
                 </button>
@@ -364,6 +413,10 @@ function App() {
 
           <p>
             <strong>Category:</strong> {selectedDetails.category}
+          </p>
+
+          <p>
+            <strong>Date:</strong> {new Date(selectedDetails.date).toLocaleDateString()}
           </p>
 
           <div className="details-actions">

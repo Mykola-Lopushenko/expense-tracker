@@ -167,8 +167,40 @@ button:hover {
 .microservice-buttons {
   display: flex;
   justify-content: center;
-  gap: 12px;
-  margin: 16px 0;
+  gap: 14px;
+  margin: 32px 0 16px;
+  flex-wrap: wrap;
+}
+
+.search-filter-box {
+  display: flex;
+  justify-content: center;
+  gap: 10px;
+  margin: 12px 0 28px;
+  flex-wrap: wrap;
+}
+
+.search-filter-box input {
+  width: 220px;
+  padding: 12px 15px;
+  border: 1px solid #cfcfe3;
+  border-radius: 14px;
+  font-size: 15px;
+}
+
+.microservice-buttons button,
+.search-filter-box button {
+  background: #055346;
+  color: white;
+  border: none;
+  border-radius: 14px;
+  padding: 11px 18px;
+  font-weight: 700;
+}
+
+.microservice-buttons button:hover,
+.search-filter-box button:hover {
+  background: #122653;
 }
 
 .summary {
@@ -179,3 +211,40 @@ button:hover {
   margin: 15px 0;
 }
 
+.period-buttons {
+  display: flex;
+  justify-content: center;
+  gap: 12px;
+  margin: 24px 0 14px;
+  flex-wrap: wrap;
+}
+
+.period-buttons button {
+  background: #efe7ff;
+  color: #4f2fa8;
+  border: 1px solid #d8c8ff;
+  border-radius: 14px;
+  padding: 10px 18px;
+  font-weight: 700;
+}
+
+.period-buttons button:hover {
+  background: #ded0ff;
+}
+
+.date-filter {
+  display: flex;
+  justify-content: center;
+  margin: 10px 0 26px;
+}
+
+.date-filter input {
+  width: 210px;
+  padding: 13px 16px;
+  border: 1px solid #cfcfe3;
+  border-radius: 14px;
+  font-size: 15px;
+  font-weight: 600;
+  color: #33324a;
+  background: #fff;
+}

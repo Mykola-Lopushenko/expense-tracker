@@ -1,62 +1,183 @@
+require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
 const axios = require("axios");
+const mongoose = require("mongoose");
 
 const app = express();
+
 app.use(cors());
 app.use(express.json());
 
-let expenses = [
-  { id: 1, description: "Gas", amount: 65.5, category: "Transport" },
-  { id: 2, description: "Restaurant", amount: 120, category: "Food" }
-];
+mongoose
+  .connect(process.env.MONGO_URI)
+  .then(() => console.log("MongoDB connected"))
+  .catch(error => console.error("MongoDB connection error:", error));
 
-// GET all expenses
-app.get("/expenses", (req, res) => {
-  res.json(expenses);
+const expenseSchema = new mongoose.Schema(
+  {
+    description: {
+      type: String,
+      required: true
+    },
+    amount: {
+      type: Number,
+      required: true
+    },
+    category: {
+      type: String,
+      required: true
+    },
+    date: {
+      type: Date,
+      default: Date.now
+    }
+  },
+  {
+    timestamps: true
+  }
+);
+
+const Expense = mongoose.model("Expense", expenseSchema);
+
+const formatExpense = (expense) => ({
+  id: expense._id.toString(),
+  description: expense.description,
+  amount: expense.amount,
+  category: expense.category,
+  date: expense.date
+});
+
+const getDateFilter = (period, selectedDate) => {
+  const now = selectedDate ? new Date(selectedDate) : new Date();
+  let startDate;
+  let endDate;
+
+  if (period === "date") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  } else if (period === "today") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    endDate = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+  } else if (period === "week") {
+    const day = now.getDay();
+    const diff = now.getDate() - day;
+    startDate = new Date(now.getFullYear(), now.getMonth(), diff);
+  } else if (period === "month") {
+    startDate = new Date(now.getFullYear(), now.getMonth(), 1);
+  } else {
+    return {};
+  }
+
+  if (endDate) {
+    return {
+      date: {
+        $gte: startDate,
+        $lt: endDate
+      }
+    };
+  }
+
+  return {
+    date: {
+      $gte: startDate
+    }
+  };
+};
+
+const getExpensesByPeriod = async (period, selectedDate) => {
+  const filter = getDateFilter(period, selectedDate);
+  return Expense.find(filter).sort({ date: -1 });
+};
+
+// GET expenses by period
+app.get("/expenses", async (req, res) => {
+  try {
+    const period = req.query.period || "all";
+    const selectedDate = req.query.date;
+    const expenses = await getExpensesByPeriod(period, selectedDate);
+
+    res.json(expenses.map(formatExpense));
+  } catch (error) {
+    console.error("GET /expenses error:", error);
+    res.status(500).json({
+      error: "Failed to get expenses",
+      details: error.message
+    });
+  }
 });
 
 // ADD expense
-app.post("/expenses", (req, res) => {
-  const { description, amount, category } = req.body;
+app.post("/expenses", async (req, res) => {
+  try {
+    const { description, amount, category, date } = req.body;
 
-  if (!description || !amount || !category) {
-    return res.status(400).json({ error: "Required fields missing" });
+    if (!description || !amount || !category) {
+      return res.status(400).json({ error: "Required fields missing" });
+    }
+
+    const newExpense = await Expense.create({
+      description,
+      amount: Number(amount),
+      category,
+      date: date || new Date()
+    });
+
+    res.json(formatExpense(newExpense));
+  } catch (error) {
+    res.status(500).json({ error: "Failed to add expense" });
   }
-
-  const newExpense = {
-    id: Date.now(),
-    description,
-    amount: Number(amount),
-    category
-  };
-
-  expenses.push(newExpense);
-  res.json(newExpense);
 });
 
 // UPDATE expense
-app.put("/expenses/:id", (req, res) => {
-  const id = Number(req.params.id);
-  const { description, amount, category } = req.body;
+app.put("/expenses/:id", async (req, res) => {
+  try {
+    const { description, amount, category, date } = req.body;
 
-  expenses = expenses.map(e =>
-    e.id === id ? { ...e, description, amount: Number(amount), category } : e
-  );
+    const updatedExpense = await Expense.findByIdAndUpdate(
+      req.params.id,
+      {
+        description,
+        amount: Number(amount),
+        category,
+        date: date || new Date()
+      },
+      { new: true }
+    );
 
-  res.json({ message: "Updated" });
+    if (!updatedExpense) {
+      return res.status(404).json({ error: "Expense not found" });
+    }
+
+    res.json(formatExpense(updatedExpense));
+  } catch (error) {
+    res.status(500).json({ error: "Failed to update expense" });
+  }
 });
 
 // DELETE expense
-app.delete("/expenses/:id", (req, res) => {
-  const id = Number(req.params.id);
-  expenses = expenses.filter(e => e.id !== id);
-  res.json({ message: "Deleted" });
+app.delete("/expenses/:id", async (req, res) => {
+  try {
+    const deletedExpense = await Expense.findByIdAndDelete(req.params.id);
+
+    if (!deletedExpense) {
+      return res.status(404).json({ error: "Expense not found" });
+    }
+
+    res.json({ message: "Deleted" });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to delete expense" });
+  }
 });
 
+// DATA SUMMARY MICROSERVICE
 app.get("/expenses/summary", async (req, res) => {
   try {
+    const period = req.query.period || "all";
+    const selectedDate = req.query.date;
+    const expenses = await getExpensesByPeriod(period, selectedDate);
+
     const response = await axios.post("http://127.0.0.1:5001/api/summary", {
       data: expenses.map(expense => ({
         description: expense.description,
@@ -73,8 +194,13 @@ app.get("/expenses/summary", async (req, res) => {
   }
 });
 
+// BUDGET ALERT MICROSERVICE
 app.get("/expenses/budget-alert", async (req, res) => {
   try {
+    const period = req.query.period || "all";
+    const selectedDate = req.query.date;
+    const expenses = await getExpensesByPeriod(period, selectedDate);
+
     const budget = Number(req.query.budget || 250);
     const totalSpending = expenses.reduce(
       (sum, expense) => sum + Number(expense.amount),
@@ -92,10 +218,15 @@ app.get("/expenses/budget-alert", async (req, res) => {
   }
 });
 
+// MONTHLY REPORT MICROSERVICE
 app.get("/expenses/monthly-report", async (req, res) => {
   try {
+    const period = req.query.period || "all";
+    const selectedDate = req.query.date;
+    const expenses = await getExpensesByPeriod(period, selectedDate);
+
     const response = await axios.post("http://127.0.0.1:5003/api/monthly-report", {
-      expenses
+      expenses: expenses.map(formatExpense)
     });
 
     res.json(response.data);
@@ -104,8 +235,13 @@ app.get("/expenses/monthly-report", async (req, res) => {
   }
 });
 
+// SEARCH AND FILTER MICROSERVICE
 app.get("/expenses/search-filter", async (req, res) => {
   try {
+    const period = req.query.period || "all";
+    const selectedDate = req.query.date;
+    const expenses = await getExpensesByPeriod(period, selectedDate);
+
     const searchText = req.query.search || "Food";
 
     const response = await axios.post("http://127.0.0.1:5004/api/filter", {
@@ -124,6 +260,8 @@ app.get("/expenses/search-filter", async (req, res) => {
   }
 });
 
-app.listen(5000, () => {
-  console.log("Server running on http://localhost:5000");
+const PORT = process.env.PORT || 5000;
+
+app.listen(PORT, () => {
+  console.log(`Server running on http://localhost:${PORT}`);
 });
