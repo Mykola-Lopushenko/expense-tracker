@@ -2,13 +2,14 @@ require("dotenv").config();
 
 const express = require("express");
 const cors = require("cors");
-const axios = require("axios");
 const mongoose = require("mongoose");
 
 const app = express();
 
 app.use(cors());
 app.use(express.json());
+
+const MONTHLY_BUDGET = 1000;
 
 mongoose
   .connect(process.env.MONGO_URI)
@@ -91,6 +92,68 @@ const getExpensesByPeriod = async (period, selectedDate) => {
   return Expense.find(filter).sort({ date: -1 });
 };
 
+const getExpenseStats = (expenses) => {
+  const amounts = expenses.map(expense => Number(expense.amount));
+
+  if (amounts.length === 0) {
+    return {
+      totalSpending: 0,
+      expenseCount: 0,
+      averageExpense: 0,
+      minimumExpense: 0,
+      maximumExpense: 0,
+      categoryTotals: {}
+    };
+  }
+
+  const totalSpending = amounts.reduce((sum, amount) => sum + amount, 0);
+
+  const categoryTotals = expenses.reduce((totals, expense) => {
+    const category = expense.category || "Other";
+    totals[category] = (totals[category] || 0) + Number(expense.amount);
+    return totals;
+  }, {});
+
+  return {
+    totalSpending,
+    expenseCount: expenses.length,
+    averageExpense: totalSpending / expenses.length,
+    minimumExpense: Math.min(...amounts),
+    maximumExpense: Math.max(...amounts),
+    categoryTotals
+  };
+};
+
+const getBudgetAlert = (totalSpending, budget) => {
+  const remaining = budget - totalSpending;
+
+  let status;
+  let message;
+
+  if (remaining < 0) {
+    status = "over_budget";
+    message = `You are over budget by $${Math.abs(remaining).toFixed(2)}.`;
+  } else if (remaining <= budget * 0.2) {
+    status = "close_to_budget";
+    message = `You are close to your budget limit. You have $${remaining.toFixed(2)} remaining.`;
+  } else {
+    status = "under_budget";
+    message = `You are under budget. You have $${remaining.toFixed(2)} remaining.`;
+  }
+
+  return {
+    budget,
+    total_spending: totalSpending,
+    remaining,
+    status,
+    message
+  };
+};
+
+app.get("/", (req, res) => {
+  res.send("Expense Tracker API is running");
+});
+
 // GET expenses by period
 app.get("/expenses", async (req, res) => {
   try {
@@ -171,100 +234,131 @@ app.delete("/expenses/:id", async (req, res) => {
   }
 });
 
-// DATA SUMMARY MICROSERVICE
+// SUMMARY
 app.get("/expenses/summary", async (req, res) => {
   try {
     const period = req.query.period || "all";
     const selectedDate = req.query.date;
     const expenses = await getExpensesByPeriod(period, selectedDate);
 
-    const response = await axios.post("http://127.0.0.1:5001/api/summary", {
-      data: expenses.map(expense => ({
-        description: expense.description,
-        amount: expense.amount,
-        category: expense.category
-      })),
-      actions: ["descriptive_statistics", "check_missing"]
-    });
+    const stats = getExpenseStats(expenses);
 
-    res.json(response.data);
+    res.json({
+      descriptive_statistics: {
+        amount: {
+          mean: stats.averageExpense,
+          min: stats.minimumExpense,
+          max: stats.maximumExpense
+        }
+      },
+      check_missing: {
+        amount: expenses.filter(expense => expense.amount === null || expense.amount === undefined).length
+      }
+    });
   } catch (error) {
-    console.error(error.message);
     res.status(500).json({ error: "Failed to get expense summary" });
   }
 });
 
-// BUDGET ALERT MICROSERVICE
+// BUDGET ALERT
 app.get("/expenses/budget-alert", async (req, res) => {
   try {
-    const period = req.query.period || "all";
+    const period = req.query.period || "month";
     const selectedDate = req.query.date;
     const expenses = await getExpensesByPeriod(period, selectedDate);
 
-    const budget = Number(req.query.budget || 250);
-    const totalSpending = expenses.reduce(
-      (sum, expense) => sum + Number(expense.amount),
-      0
-    );
+    const budget = Number(req.query.budget || MONTHLY_BUDGET);
+    const stats = getExpenseStats(expenses);
 
-    const response = await axios.post("http://127.0.0.1:5002/api/budget-alert", {
-      budget,
-      total_spending: totalSpending
-    });
-
-    res.json(response.data);
+    res.json(getBudgetAlert(stats.totalSpending, budget));
   } catch (error) {
     res.status(500).json({ error: "Failed to get budget alert" });
   }
 });
 
-// MONTHLY REPORT MICROSERVICE
+// MONTHLY REPORT
 app.get("/expenses/monthly-report", async (req, res) => {
   try {
-    const period = req.query.period || "all";
+    const period = req.query.period || "month";
     const selectedDate = req.query.date;
     const expenses = await getExpensesByPeriod(period, selectedDate);
 
-    const response = await axios.post("http://127.0.0.1:5003/api/monthly-report", {
-      expenses: expenses.map(formatExpense)
-    });
+    const stats = getExpenseStats(expenses);
 
-    res.json(response.data);
+    res.json({
+      total_spending: stats.totalSpending,
+      expense_count: stats.expenseCount,
+      average_expense: stats.averageExpense,
+      category_totals: stats.categoryTotals
+    });
   } catch (error) {
     res.status(500).json({ error: "Failed to get monthly report" });
   }
 });
 
-// SEARCH AND FILTER MICROSERVICE
+// SEARCH AND FILTER
 app.get("/expenses/search-filter", async (req, res) => {
   try {
     const period = req.query.period || "all";
     const selectedDate = req.query.date;
+    const searchText = (req.query.search || "").toLowerCase();
+
     const expenses = await getExpensesByPeriod(period, selectedDate);
 
-    const searchText = req.query.search || "Food";
+    const filteredData = expenses
+      .map(formatExpense)
+      .filter(expense =>
+        expense.description.toLowerCase().includes(searchText) ||
+        expense.category.toLowerCase().includes(searchText) ||
+        String(expense.amount).includes(searchText)
+      );
 
-    const response = await axios.post("http://127.0.0.1:5004/api/filter", {
-      data: expenses.map(expense => ({
-        description: expense.description,
-        amount: expense.amount,
-        category: expense.category
-      })),
-      search_text: searchText,
-      case_sensitive: false
+    res.json({
+      filtered_data: filteredData
     });
-
-    res.json(response.data);
   } catch (error) {
     res.status(500).json({ error: "Failed to search and filter expenses" });
   }
 });
 
-const PORT = process.env.PORT || 5000;
+// DASHBOARD
+app.get("/expenses/dashboard", async (req, res) => {
+  try {
+    const todayExpenses = await getExpensesByPeriod("today");
+    const weekExpenses = await getExpensesByPeriod("week");
+    const monthExpenses = await getExpensesByPeriod("month");
 
-app.get("/", (req, res) => {
-  res.send("Expense Tracker API is running");
+    const todayStats = getExpenseStats(todayExpenses);
+    const weekStats = getExpenseStats(weekExpenses);
+    const monthStats = getExpenseStats(monthExpenses);
+
+    const budgetAlert = getBudgetAlert(monthStats.totalSpending, MONTHLY_BUDGET);
+
+    const topCategory = Object.entries(monthStats.categoryTotals).sort(
+      (a, b) => b[1] - a[1]
+    )[0];
+
+    res.json({
+      monthly_budget: MONTHLY_BUDGET,
+      today_total: todayStats.totalSpending,
+      week_total: weekStats.totalSpending,
+      month_total: monthStats.totalSpending,
+      month_remaining: budgetAlert.remaining,
+      month_transaction_count: monthStats.expenseCount,
+      top_category: topCategory
+        ? {
+            category: topCategory[0],
+            amount: topCategory[1]
+          }
+        : null,
+      category_totals: monthStats.categoryTotals
+    });
+  } catch (error) {
+    res.status(500).json({ error: "Failed to get dashboard data" });
+  }
 });
+
+const PORT = process.env.PORT || 5000;
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
