@@ -1,6 +1,8 @@
 import { useEffect, useState } from "react";
 import "./App.css";
 
+const API_URL = "https://expense-tracker-backend-v11c.onrender.com";
+
 function App() {
   const [expenses, setExpenses] = useState([]);
   const [summary, setSummary] = useState(null);
@@ -27,8 +29,8 @@ function App() {
   useEffect(() => {
     const url =
       period === "date"
-        ? `http://localhost:5000/expenses?period=date&date=${selectedDate}`
-        : `http://localhost:5000/expenses?period=${period}`;
+        ? `${API_URL}/expenses?period=date&date=${selectedDate}`
+        : `${API_URL}/expenses?period=${period}`;
 
     fetch(url)
       .then(res => res.json())
@@ -59,7 +61,7 @@ function App() {
       return;
     }
 
-    const res = await fetch("http://localhost:5000/expenses", {
+    const res = await fetch("${API_URL}/expenses", {
       method: "POST",
       headers: {
         "Content-Type": "application/json"
@@ -94,7 +96,7 @@ function App() {
       return;
     }
 
-    const res = await fetch(`http://localhost:5000/expenses/${editingId}`, {
+    const res = await fetch(`${API_URL}/expenses/${editingId}`, {
       method: "PUT",
       headers: {
         "Content-Type": "application/json"
@@ -119,7 +121,7 @@ function App() {
       return;
     }
 
-    await fetch(`http://localhost:5000/expenses/${id}`, {
+    await fetch(`${API_URL}/expenses/${id}`, {
       method: "DELETE"
     });
 
@@ -133,7 +135,7 @@ function App() {
       closeAllPanels();
 
       const res = await fetch(
-        `http://localhost:5000/expenses/summary?period=${period}`
+        `${API_URL}/expenses/summary?period=${period}`
       );
       const data = await res.json();
 
@@ -148,7 +150,7 @@ function App() {
       closeAllPanels();
 
       const res = await fetch(
-        `http://localhost:5000/expenses/budget-alert?budget=1000&period=${period}&date=${selectedDate}`
+        `${API_URL}/expenses/budget-alert?budget=1000&period=${period}&date=${selectedDate}`
       );
 
       const data = await res.json();
@@ -164,7 +166,7 @@ function App() {
       closeAllPanels();
 
       const res = await fetch(
-        `http://localhost:5000/expenses/monthly-report?period=${period}`
+        `${API_URL}/expenses/monthly-report?period=${period}`
       );
 
       const data = await res.json();
@@ -180,7 +182,7 @@ function App() {
       closeAllPanels();
 
       const res = await fetch(
-        `http://localhost:5000/expenses/search-filter?search=${encodeURIComponent(searchTerm)}&period=${period}`
+        `${API_URL}/expenses/search-filter?search=${encodeURIComponent(searchTerm)}&period=${period}`
       );
 
       const data = await res.json();
