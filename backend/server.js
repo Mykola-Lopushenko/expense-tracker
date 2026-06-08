@@ -262,6 +262,10 @@ app.get("/expenses/search-filter", async (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 
+app.get("/", (req, res) => {
+  res.send("Expense Tracker API is running");
+});
+
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);
 });
