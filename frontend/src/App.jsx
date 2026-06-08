@@ -1,443 +1,491 @@
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import "./App.css";
 
 const API_URL = "https://expense-tracker-backend-v11c.onrender.com";
 
-function App() {
-  const [expenses, setExpenses] = useState([]);
-  const [summary, setSummary] = useState(null);
-  const [budgetAlert, setBudgetAlert] = useState(null);
+const CATEGORY_META = {
+  Food:      { icon: "🍔", color: "cat-food" },
+  Groceries: { icon: "🛒", color: "cat-groceries" },
+  Transport: { icon: "🚗", color: "cat-transport" },
+  Other:     { icon: "📦", color: "cat-other" },
+};
+
+const PERIOD_LABELS = {
+  all:   "All Expenses",
+  today: "Today",
+  week:  "This Week",
+  month: "This Month",
+  date:  "Selected Date",
+};
+
+function Toast({ message, onDone }) {
+  useEffect(() => {
+    if (!message) return;
+    const t = setTimeout(onDone, 2800);
+    return () => clearTimeout(t);
+  }, [message, onDone]);
+
+  if (!message) return null;
+  return <div className="toast">{message}</div>;
+}
+
+function StatCard({ label, value }) {
+  return (
+    <div className="stat-card">
+      <span className="stat-label">{label}</span>
+      <span className="stat-value">{value}</span>
+    </div>
+  );
+}
+
+export default function App() {
+  const [expenses, setExpenses]           = useState([]);
+  const [summary, setSummary]             = useState(null);
+  const [budgetAlert, setBudgetAlert]     = useState(null);
   const [monthlyReport, setMonthlyReport] = useState(null);
-  const [searchFilter, setSearchFilter] = useState(null);
-  const [searchTerm, setSearchTerm] = useState("Food");
-  const [period, setPeriod] = useState("all");
-  const [message, setMessage] = useState("");
-
-  const [editingId, setEditingId] = useState(null);
-  const [detailsId, setDetailsId] = useState(null);
-
-  const [selectedDate, setSelectedDate] = useState(
+  const [searchFilter, setSearchFilter]   = useState(null);
+  const [searchTerm, setSearchTerm]       = useState("");
+  const [period, setPeriod]               = useState("all");
+  const [toast, setToast]                 = useState("");
+  const [editingId, setEditingId]         = useState(null);
+  const [detailsId, setDetailsId]         = useState(null);
+  const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
+  const [activePanel, setActivePanel]     = useState(null); // 'summary' | 'budget' | 'report' | 'search'
+  const [loading, setLoading]             = useState(false);
+  const [selectedDate, setSelectedDate]   = useState(
     new Date().toISOString().split("T")[0]
   );
-
-  const [form, setForm] = useState({
-    description: "",
-    amount: "",
-    category: ""
-  });
+  const [form, setForm] = useState({ description: "", amount: "", category: "" });
+  const descRef = useRef(null);
 
   useEffect(() => {
     const url =
       period === "date"
         ? `${API_URL}/expenses?period=date&date=${selectedDate}`
         : `${API_URL}/expenses?period=${period}`;
-
     fetch(url)
       .then(res => res.json())
-      .then(data => setExpenses(data));
+      .then(data => setExpenses(data))
+      .catch(() => {});
   }, [period, selectedDate]);
 
   const clearForm = () => {
     setForm({ description: "", amount: "", category: "" });
     setEditingId(null);
+    descRef.current?.focus();
   };
 
-  const showMessage = (text) => {
-    setMessage(text);
-    setTimeout(() => setMessage(""), 2000);
-  };
+  const showToast = (text) => setToast(text);
 
   const closeAllPanels = () => {
     setDetailsId(null);
-    setSummary(null);
-    setBudgetAlert(null);
-    setMonthlyReport(null);
-    setSearchFilter(null);
+    setActivePanel(null);
+  };
+
+  const handleKeyDown = (e) => {
+    if (e.key === "Enter") editingId ? saveEdit() : addExpense();
   };
 
   const addExpense = async () => {
     if (!form.description || !form.amount || !form.category) {
-      alert("Required: Please fill in all fields.");
+      alert("Please fill in all fields.");
       return;
     }
-
-    const res = await fetch("${API_URL}/expenses", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(form)
-    });
-
-    const newExpense = await res.json();
-
-    if (period === "all" || period === "today") {
-      setExpenses([newExpense, ...expenses]);
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/expenses`, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const newExpense = await res.json();
+      if (period === "all" || period === "today") {
+        setExpenses(prev => [newExpense, ...prev]);
+      }
+      clearForm();
+      showToast("Expense added");
+    } finally {
+      setLoading(false);
     }
-
-    clearForm();
-    showMessage("Expense added successfully");
   };
 
   const startEdit = (expense) => {
     closeAllPanels();
     setEditingId(expense.id);
-
-    setForm({
-      description: expense.description,
-      amount: expense.amount,
-      category: expense.category
-    });
+    setForm({ description: expense.description, amount: expense.amount, category: expense.category });
+    window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
   const saveEdit = async () => {
     if (!form.description || !form.amount || !form.category) {
-      alert("Required: Please fill in all fields.");
+      alert("Please fill in all fields.");
       return;
     }
-
-    const res = await fetch(`${API_URL}/expenses/${editingId}`, {
-      method: "PUT",
-      headers: {
-        "Content-Type": "application/json"
-      },
-      body: JSON.stringify(form)
-    });
-
-    const updatedExpense = await res.json();
-
-    setExpenses(
-      expenses.map(expense =>
-        expense.id === editingId ? updatedExpense : expense
-      )
-    );
-
-    clearForm();
-    showMessage("Expense updated successfully");
+    setLoading(true);
+    try {
+      const res = await fetch(`${API_URL}/expenses/${editingId}`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(form),
+      });
+      const updated = await res.json();
+      setExpenses(prev => prev.map(e => (e.id === editingId ? updated : e)));
+      clearForm();
+      showToast("Expense updated");
+    } finally {
+      setLoading(false);
+    }
   };
 
   const deleteExpense = async (id) => {
-    if (!window.confirm("Deleting this expense cannot be undone. Continue?")) {
-      return;
-    }
-
-    await fetch(`${API_URL}/expenses/${id}`, {
-      method: "DELETE"
-    });
-
-    setExpenses(expenses.filter(expense => expense.id !== id));
+    if (!window.confirm("Delete this expense? This cannot be undone.")) return;
+    await fetch(`${API_URL}/expenses/${id}`, { method: "DELETE" });
+    setExpenses(prev => prev.filter(e => e.id !== id));
     closeAllPanels();
-    showMessage("Expense deleted successfully");
+    showToast("Expense deleted");
   };
 
-  const getSummary = async () => {
-    try {
-      closeAllPanels();
-
-      const res = await fetch(
-        `${API_URL}/expenses/summary?period=${period}`
-      );
-      const data = await res.json();
-
-      setSummary(data);
-    } catch (error) {
-      alert("Could not get expense summary.");
-    }
-  };
-
-  const getBudgetAlert = async () => {
-    try {
-      closeAllPanels();
-
-      const res = await fetch(
-        `${API_URL}/expenses/budget-alert?budget=1000&period=${period}&date=${selectedDate}`
-      );
-
-      const data = await res.json();
-
-      setBudgetAlert(data);
-    } catch (error) {
-      alert("Could not get budget alert.");
-    }
-  };
-
-  const getMonthlyReport = async () => {
-    try {
-      closeAllPanels();
-
-      const res = await fetch(
-        `${API_URL}/expenses/monthly-report?period=${period}`
-      );
-
-      const data = await res.json();
-
-      setMonthlyReport(data);
-    } catch (error) {
-      alert("Could not get monthly report.");
-    }
-  };
-
-  const getSearchFilter = async () => {
-    try {
-      closeAllPanels();
-
-      const res = await fetch(
-        `${API_URL}/expenses/search-filter?search=${encodeURIComponent(searchTerm)}&period=${period}`
-      );
-
-      const data = await res.json();
-
-      setSearchFilter(data);
-    } catch (error) {
-      alert("Could not search and filter expenses.");
-    }
-  };
-
-  const openDetails = (id) => {
+  const fetchPanel = async (key, url) => {
     closeAllPanels();
-    setDetailsId(id);
+    try {
+      const res = await fetch(url);
+      const data = await res.json();
+      if (key === "summary")  setSummary(data);
+      if (key === "budget")   setBudgetAlert(data);
+      if (key === "report")   setMonthlyReport(data);
+      if (key === "search")   setSearchFilter(data);
+      setActivePanel(key);
+    } catch {
+      alert("Could not load data.");
+    }
   };
 
-  const changePeriod = (newPeriod) => {
+  const getSummary      = () => fetchPanel("summary", `${API_URL}/expenses/summary?period=${period}`);
+  const getBudgetAlert  = () => fetchPanel("budget",  `${API_URL}/expenses/budget-alert?budget=1000&period=${period}&date=${selectedDate}`);
+  const getMonthlyReport= () => fetchPanel("report",  `${API_URL}/expenses/monthly-report?period=${period}`);
+  const getSearchFilter = () => fetchPanel("search",  `${API_URL}/expenses/search-filter?search=${encodeURIComponent(searchTerm)}&period=${period}`);
+
+  const changePeriod = (p) => {
     closeAllPanels();
-    setPeriod(newPeriod);
+    setPeriod(p);
+    setMobileFiltersOpen(false);
   };
 
-  const selectedDetails = expenses.find(expense => expense.id === detailsId);
-  const total = expenses.reduce((sum, expense) => sum + Number(expense.amount), 0);
+  const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const selectedDetails = expenses.find(e => e.id === detailsId);
+  const budgetPct = Math.min((total / 1000) * 100, 100);
+  const budgetColor = budgetPct >= 100 ? "danger" : budgetPct >= 80 ? "warning" : "ok";
 
   return (
     <div className="app">
-      <h1>Expense Tracker</h1>
-      <p className="subtitle">Track expenses and see total spending instantly.</p>
+      <Toast message={toast} onDone={() => setToast("")} />
 
-      <ul className="feature-info">
-        <li>Track daily expenses</li>
-        <li>Monitor total spending</li>
-        <li>Edit expenses anytime</li>
-      </ul>
+      {/* ── Header ── */}
+      <header className="app-header">
+        <div className="header-icon" aria-hidden="true">💸</div>
+        <h1>Expense Tracker</h1>
+        <p className="subtitle">Know where your money goes — before it's gone.</p>
 
-      <div className="period-buttons">
-        <button onClick={() => changePeriod("all")}>All</button>
-        <button onClick={() => changePeriod("today")}>Today</button>
-        <button onClick={() => changePeriod("week")}>This Week</button>
-        <button onClick={() => changePeriod("month")}>This Month</button>
+        <div className="hero-stats">
+          <div className="hero-stat">
+            <span className="hero-stat-num">${total.toFixed(2)}</span>
+            <span className="hero-stat-label">{PERIOD_LABELS[period]}</span>
+          </div>
+          <div className={`budget-bar-wrap budget-${budgetColor}`}>
+            <div className="budget-bar-track">
+              <div className="budget-bar-fill" style={{ width: `${budgetPct}%` }} />
+            </div>
+            <span className="budget-bar-label">
+              ${(1000 - total).toFixed(2)} of $1,000 budget remaining
+            </span>
+          </div>
+        </div>
+      </header>
+
+      {/* ── Period Filter ── */}
+      <div className="filter-header">
+        <span className="filter-label">
+          Viewing: <strong>{PERIOD_LABELS[period]}</strong>
+        </span>
+        <button
+          className="filter-menu-btn"
+          aria-label="Toggle filters"
+          onClick={() => setMobileFiltersOpen(o => !o)}
+        >
+          ☰
+        </button>
       </div>
 
-      <div className="date-filter">
-        <input
-          type="date"
-          value={selectedDate}
-          onChange={e => {
-            setSelectedDate(e.target.value);
-            changePeriod("date");
-          }}
-        />
+      <div className={`filters-panel${mobileFiltersOpen ? " open" : ""}`}>
+        <div className="period-buttons">
+          {["all", "today", "week", "month"].map(p => (
+            <button
+              key={p}
+              className={`period-btn${period === p ? " active" : ""}`}
+              onClick={() => changePeriod(p)}
+            >
+              {p === "all" ? "All" : p === "today" ? "Today" : p === "week" ? "This Week" : "This Month"}
+            </button>
+          ))}
+        </div>
+        <div className="date-filter">
+          <input
+            type="date"
+            value={selectedDate}
+            onChange={e => { setSelectedDate(e.target.value); changePeriod("date"); }}
+          />
+        </div>
       </div>
 
-      <div className="form">
-        <div className="form-row">
+      {/* ── Add / Edit Form ── */}
+      <section className={`form${editingId ? " editing" : ""}`} aria-label={editingId ? "Edit expense" : "Add expense"}>
+        <h2 className="form-title">{editingId ? "✏️ Edit Expense" : "Add Expense"}</h2>
+
+        <div className="form-row" onKeyDown={handleKeyDown}>
           <label>
-            Description *
+            Description
             <input
-              placeholder="Example: Coffee"
+              ref={descRef}
+              placeholder="e.g. Coffee"
               value={form.description}
               onChange={e => setForm({ ...form, description: e.target.value })}
             />
           </label>
-
           <label>
-            Amount *
+            Amount ($)
             <input
-              placeholder="Example: 9.99"
+              placeholder="0.00"
               type="number"
+              min="0"
+              step="0.01"
               value={form.amount}
               onChange={e => setForm({ ...form, amount: e.target.value })}
             />
           </label>
-
           <label>
-            Category *
+            Category
             <select
               value={form.category}
               onChange={e => setForm({ ...form, category: e.target.value })}
             >
-              <option value="">Select Category</option>
-              <option value="Food">Food</option>
-              <option value="Groceries">Groceries</option>
-              <option value="Transport">Transport</option>
-              <option value="Other">Other</option>
+              <option value="">Select</option>
+              {Object.keys(CATEGORY_META).map(c => (
+                <option key={c} value={c}>{CATEGORY_META[c].icon} {c}</option>
+              ))}
             </select>
           </label>
         </div>
 
-        <p className="required-note">* Required fields</p>
+        <p className="required-note">All fields required · Press Enter to submit</p>
 
         {editingId ? (
           <div className="button-row">
-            <button className="primary" onClick={saveEdit}>
-              Save Changes
+            <button className="btn-primary" onClick={saveEdit} disabled={loading}>
+              {loading ? "Saving…" : "Save Changes"}
             </button>
-            <button className="secondary" onClick={clearForm}>
-              Cancel
-            </button>
+            <button className="btn-ghost" onClick={clearForm}>Cancel</button>
           </div>
         ) : (
-          <button className="primary" onClick={addExpense}>
-            Add Expense
+          <button className="btn-primary full" onClick={addExpense} disabled={loading}>
+            {loading ? "Adding…" : "+ Add Expense"}
           </button>
         )}
-      </div>
+      </section>
 
-      {message && <p className="success">{message}</p>}
-
-      <div className="expense-list">
-        {expenses.map(expense => (
-          <div className="expense-item" key={expense.id}>
-            <div className="expense-top">
-              <span>
-                {expense.description} - ${Number(expense.amount).toFixed(2)}
-              </span>
-
-              <div className="expense-actions">
-                <button
-                  className="details-btn"
-                  onClick={() => openDetails(expense.id)}
-                >
-                  Details
-                </button>
-
-                <button
-                  className="secondary"
-                  onClick={() => startEdit(expense)}
-                >
-                  Edit
-                </button>
-
-                <button
-                  className="delete-btn"
-                  onClick={() => deleteExpense(expense.id)}
-                >
-                  Delete
-                </button>
-              </div>
-            </div>
+      {/* ── Expense List ── */}
+      <section className="expense-list" aria-label="Expenses">
+        {expenses.length === 0 ? (
+          <div className="empty-state">
+            <span className="empty-icon">🧾</span>
+            <p>No expenses yet.</p>
+            <p className="empty-sub">Add your first expense above to get started.</p>
           </div>
-        ))}
-      </div>
+        ) : (
+          expenses.map(expense => {
+            const meta = CATEGORY_META[expense.category] || CATEGORY_META["Other"];
+            return (
+              <div
+                className={`expense-item ${meta.color}${detailsId === expense.id ? " expanded" : ""}`}
+                key={expense.id}
+              >
+                <div className="expense-top">
+                  <div className="expense-info">
+                    <span className="expense-icon" aria-hidden="true">{meta.icon}</span>
+                    <div>
+                      <span className="expense-desc">{expense.description}</span>
+                      <span className={`cat-badge ${meta.color}`}>{expense.category}</span>
+                    </div>
+                  </div>
+                  <div className="expense-right">
+                    <span className="expense-amount">${Number(expense.amount).toFixed(2)}</span>
+                    <div className="expense-actions">
+                      <button
+                        className="icon-btn"
+                        title="Details"
+                        aria-label="View details"
+                        onClick={() => detailsId === expense.id ? setDetailsId(null) : (closeAllPanels(), setDetailsId(expense.id))}
+                      >
+                        ℹ️
+                      </button>
+                      <button
+                        className="icon-btn"
+                        title="Edit"
+                        aria-label="Edit expense"
+                        onClick={() => startEdit(expense)}
+                      >
+                        ✏️
+                      </button>
+                      <button
+                        className="icon-btn danger"
+                        title="Delete"
+                        aria-label="Delete expense"
+                        onClick={() => deleteExpense(expense.id)}
+                      >
+                        🗑️
+                      </button>
+                    </div>
+                  </div>
+                </div>
 
-      <div className="microservice-buttons">
-        <button onClick={getSummary}>Get Data Summary</button>
-        <button onClick={getBudgetAlert}>Check Budget Alert</button>
-        <button onClick={getMonthlyReport}>Generate Monthly Report</button>
-      </div>
+                {detailsId === expense.id && selectedDetails && (
+                  <div className="details-inline">
+                    <div className="details-grid">
+                      <span className="detail-label">Date</span>
+                      <span>{new Date(selectedDetails.date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</span>
+                      <span className="detail-label">Category</span>
+                      <span>{meta.icon} {selectedDetails.category}</span>
+                      <span className="detail-label">Amount</span>
+                      <span>${Number(selectedDetails.amount).toFixed(2)}</span>
+                    </div>
+                    <button className="btn-primary" style={{ marginTop: "12px" }} onClick={() => startEdit(selectedDetails)}>
+                      Edit This Expense
+                    </button>
+                  </div>
+                )}
+              </div>
+            );
+          })
+        )}
+      </section>
 
-      <div className="search-filter-box">
+      {/* ── Insights Bar ── */}
+      <section className="insights-bar" aria-label="Insights">
+        <button className={`insight-btn${activePanel === "summary" ? " active" : ""}`} onClick={getSummary}>
+          📊 Summary
+        </button>
+        <button className={`insight-btn${activePanel === "budget" ? " active" : ""}`} onClick={getBudgetAlert}>
+          🔔 Budget Alert
+        </button>
+        <button className={`insight-btn${activePanel === "report" ? " active" : ""}`} onClick={getMonthlyReport}>
+          📅 Monthly Report
+        </button>
+      </section>
+
+      <div className="search-bar">
         <input
-          placeholder="Search expenses, e.g. Food"
+          placeholder="Search by name, category, or amount…"
           value={searchTerm}
           onChange={e => setSearchTerm(e.target.value)}
+          onKeyDown={e => e.key === "Enter" && getSearchFilter()}
         />
-        <button onClick={getSearchFilter}>Search / Filter Expenses</button>
+        <button className="btn-search" onClick={getSearchFilter}>Search</button>
       </div>
 
-      {summary && (
-        <div className="summary">
-          <h2>Data Summary Microservice</h2>
-          <p>Average Expense: ${summary.descriptive_statistics?.amount?.mean?.toFixed(2)}</p>
-          <p>Minimum Expense: ${summary.descriptive_statistics?.amount?.min?.toFixed(2)}</p>
-          <p>Maximum Expense: ${summary.descriptive_statistics?.amount?.max?.toFixed(2)}</p>
-          <p>Missing Amount Values: {summary.check_missing?.amount}</p>
-        </div>
-      )}
-
-      {budgetAlert && (
-        <div className="summary">
-          <h2>Budget Alert Microservice</h2>
-          <p><strong>Status:</strong> {budgetAlert.status}</p>
-          <p><strong>Remaining:</strong> ${Number(budgetAlert.remaining).toFixed(2)}</p>
-          <p>{budgetAlert.message}</p>
-        </div>
-      )}
-
-      {monthlyReport && (
-        <div className="summary">
-          <h2>Monthly Report Microservice</h2>
-          <p><strong>Total Spending:</strong> ${Number(monthlyReport.total_spending).toFixed(2)}</p>
-          <p><strong>Expense Count:</strong> {monthlyReport.expense_count}</p>
-          <p><strong>Average Expense:</strong> ${Number(monthlyReport.average_expense).toFixed(2)}</p>
-
-          <h3>Category Totals</h3>
-
-          <div className="category-totals">
-            {Object.entries(monthlyReport.category_totals || {}).map(([category, amount]) => (
-              <p key={category}>
-                <strong>{category}:</strong> ${Number(amount).toFixed(2)}
-              </p>
-            ))}
+      {/* ── Panels ── */}
+      {activePanel === "summary" && summary && (
+        <div className="panel">
+          <div className="panel-header">
+            <h3>📊 Data Summary</h3>
+            <button className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
+          </div>
+          <div className="stat-grid">
+            <StatCard label="Average" value={`$${summary.descriptive_statistics?.amount?.mean?.toFixed(2) ?? "—"}`} />
+            <StatCard label="Minimum" value={`$${summary.descriptive_statistics?.amount?.min?.toFixed(2) ?? "—"}`} />
+            <StatCard label="Maximum" value={`$${summary.descriptive_statistics?.amount?.max?.toFixed(2) ?? "—"}`} />
+            <StatCard label="Missing" value={summary.check_missing?.amount ?? 0} />
           </div>
         </div>
       )}
 
-      {searchFilter && (
-        <div className="summary">
-          <h2>Search and Filter Microservice</h2>
-
-          <p>
-            <strong>Search Term:</strong> {searchTerm}
-          </p>
-
-          <p>
-            <strong>Matches Found:</strong> {searchFilter.filtered_data?.length || 0}
-          </p>
-
-          <div className="category-totals">
-            {(searchFilter.filtered_data || []).map((expense, index) => (
-              <p key={index}>
-                <strong>{expense.description}</strong> - ${Number(expense.amount).toFixed(2)} ({expense.category})
-              </p>
-            ))}
+      {activePanel === "budget" && budgetAlert && (
+        <div className={`panel panel-budget panel-budget-${budgetAlert.status}`}>
+          <div className="panel-header">
+            <h3>🔔 Budget Alert</h3>
+            <button className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
+          </div>
+          <div className="budget-status-badge">{budgetAlert.status.replace(/_/g, " ")}</div>
+          <p className="budget-msg">{budgetAlert.message}</p>
+          <div className="stat-grid">
+            <StatCard label="Budget"    value={`$${Number(budgetAlert.budget).toFixed(2)}`} />
+            <StatCard label="Spent"     value={`$${Number(budgetAlert.total_spending).toFixed(2)}`} />
+            <StatCard label="Remaining" value={`$${Number(budgetAlert.remaining).toFixed(2)}`} />
           </div>
         </div>
       )}
 
-      {selectedDetails && (
-        <div className="details-box">
-          <h3>Expense Details</h3>
-
-          <p>
-            <strong>Description:</strong> {selectedDetails.description}
-          </p>
-
-          <p>
-            <strong>Amount:</strong> ${Number(selectedDetails.amount).toFixed(2)}
-          </p>
-
-          <p>
-            <strong>Category:</strong> {selectedDetails.category}
-          </p>
-
-          <p>
-            <strong>Date:</strong> {new Date(selectedDetails.date).toLocaleDateString()}
-          </p>
-
-          <div className="details-actions">
-            <button className="primary" onClick={() => startEdit(selectedDetails)}>
-              Edit This Expense
-            </button>
-
-            <button className="secondary" onClick={() => setDetailsId(null)}>
-              Close Details
-            </button>
+      {activePanel === "report" && monthlyReport && (
+        <div className="panel">
+          <div className="panel-header">
+            <h3>📅 Monthly Report</h3>
+            <button className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
+          </div>
+          <div className="stat-grid">
+            <StatCard label="Total"     value={`$${Number(monthlyReport.total_spending).toFixed(2)}`} />
+            <StatCard label="Count"     value={monthlyReport.expense_count} />
+            <StatCard label="Average"   value={`$${Number(monthlyReport.average_expense).toFixed(2)}`} />
+          </div>
+          <h4 className="section-label">By Category</h4>
+          <div className="category-list">
+            {Object.entries(monthlyReport.category_totals || {}).map(([cat, amt]) => {
+              const meta = CATEGORY_META[cat] || CATEGORY_META["Other"];
+              const pct = total > 0 ? (amt / total) * 100 : 0;
+              return (
+                <div key={cat} className={`cat-row ${meta.color}`}>
+                  <span className="cat-row-label">{meta.icon} {cat}</span>
+                  <div className="cat-row-bar-wrap">
+                    <div className="cat-row-bar" style={{ width: `${pct}%` }} />
+                  </div>
+                  <span className="cat-row-amt">${Number(amt).toFixed(2)}</span>
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
 
+      {activePanel === "search" && searchFilter && (
+        <div className="panel">
+          <div className="panel-header">
+            <h3>🔍 Search Results</h3>
+            <button className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
+          </div>
+          <p className="panel-meta">
+            <strong>{searchFilter.filtered_data?.length || 0}</strong> match{searchFilter.filtered_data?.length !== 1 ? "es" : ""} for "{searchTerm}"
+          </p>
+          {(searchFilter.filtered_data || []).length === 0 ? (
+            <p className="empty-sub">No expenses match your search.</p>
+          ) : (
+            <div className="search-results">
+              {(searchFilter.filtered_data || []).map((expense, i) => {
+                const meta = CATEGORY_META[expense.category] || CATEGORY_META["Other"];
+                return (
+                  <div key={i} className={`search-result-row ${meta.color}`}>
+                    <span>{meta.icon} {expense.description}</span>
+                    <span className="cat-badge">{expense.category}</span>
+                    <span className="expense-amount">${Number(expense.amount).toFixed(2)}</span>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      )}
+
+      {/* ── Total ── */}
       <div className="total-box">
-        Total: ${total.toFixed(2)}
+        <span className="total-label">Total</span>
+        <span className="total-amount">${total.toFixed(2)}</span>
       </div>
     </div>
   );
 }
-
-export default App;
