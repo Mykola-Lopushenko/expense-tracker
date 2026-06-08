@@ -24,7 +24,6 @@ function Toast({ message, onDone }) {
     const t = setTimeout(onDone, 2800);
     return () => clearTimeout(t);
   }, [message, onDone]);
-
   if (!message) return null;
   return <div className="toast">{message}</div>;
 }
@@ -38,7 +37,135 @@ function StatCard({ label, value }) {
   );
 }
 
+// ── Auth Screen ────────────────────────────────────────────
+function AuthScreen({ onAuth }) {
+  const [mode, setMode]       = useState("login"); // 'login' | 'register'
+  const [email, setEmail]     = useState("");
+  const [password, setPassword] = useState("");
+  const [error, setError]     = useState("");
+  const [loading, setLoading] = useState(false);
+
+  const submit = async () => {
+    setError("");
+    if (!email || !password) { setError("Please fill in all fields."); return; }
+    if (mode === "register" && password.length < 8) {
+      setError("Password must be at least 8 characters.");
+      return;
+    }
+    setLoading(true);
+    try {
+      const res  = await fetch(`${API_URL}/auth/${mode}`, {
+        method:  "POST",
+        headers: { "Content-Type": "application/json" },
+        body:    JSON.stringify({ email, password }),
+      });
+      const data = await res.json();
+      if (!res.ok) { setError(data.error || "Something went wrong."); return; }
+      onAuth(data.token, data.email);
+    } catch {
+      setError("Could not connect to server.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const handleKey = (e) => { if (e.key === "Enter") submit(); };
+
+  return (
+    <div className="auth-wrap">
+      <div className="auth-card">
+        <div className="auth-logo" aria-hidden="true">💸</div>
+        <h1 className="auth-title">Expense Tracker</h1>
+        <p className="auth-subtitle">
+          {mode === "login" ? "Sign in to your account" : "Create your account"}
+        </p>
+
+        <div className="auth-tabs">
+          <button
+            className={`auth-tab${mode === "login" ? " active" : ""}`}
+            onClick={() => { setMode("login"); setError(""); }}
+          >
+            Sign In
+          </button>
+          <button
+            className={`auth-tab${mode === "register" ? " active" : ""}`}
+            onClick={() => { setMode("register"); setError(""); }}
+          >
+            Register
+          </button>
+        </div>
+
+        <div className="auth-fields" onKeyDown={handleKey}>
+          <label className="auth-label">
+            Email
+            <input
+              type="email"
+              placeholder="you@example.com"
+              value={email}
+              autoComplete="email"
+              onChange={e => setEmail(e.target.value)}
+            />
+          </label>
+          <label className="auth-label">
+            Password
+            <input
+              type="password"
+              placeholder={mode === "register" ? "Min. 8 characters" : "Your password"}
+              value={password}
+              autoComplete={mode === "login" ? "current-password" : "new-password"}
+              onChange={e => setPassword(e.target.value)}
+            />
+          </label>
+        </div>
+
+        {error && <p className="auth-error">{error}</p>}
+
+        <button className="btn-primary full" onClick={submit} disabled={loading}>
+          {loading ? "Please wait…" : mode === "login" ? "Sign In" : "Create Account"}
+        </button>
+
+        <p className="auth-switch">
+          {mode === "login" ? "No account yet? " : "Already have an account? "}
+          <button
+            className="auth-link"
+            onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}
+          >
+            {mode === "login" ? "Register" : "Sign In"}
+          </button>
+        </p>
+      </div>
+    </div>
+  );
+}
+
+// ── Main App ───────────────────────────────────────────────
 export default function App() {
+  const [token, setToken]   = useState(() => sessionStorage.getItem("et_token") || "");
+  const [userEmail, setUserEmail] = useState(() => sessionStorage.getItem("et_email") || "");
+
+  const handleAuth = (t, email) => {
+    sessionStorage.setItem("et_token", t);
+    sessionStorage.setItem("et_email", email);
+    setToken(t);
+    setUserEmail(email);
+  };
+
+  const handleLogout = () => {
+    sessionStorage.removeItem("et_token");
+    sessionStorage.removeItem("et_email");
+    setToken("");
+    setUserEmail("");
+  };
+
+  if (!token) return <AuthScreen onAuth={handleAuth} />;
+
+  return <ExpenseApp token={token} userEmail={userEmail} onLogout={handleLogout} />;
+}
+
+// ── Expense App (authenticated) ────────────────────────────
+function ExpenseApp({ token, userEmail, onLogout }) {
+  const authHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
+
   const [expenses, setExpenses]           = useState([]);
   const [summary, setSummary]             = useState(null);
   const [budgetAlert, setBudgetAlert]     = useState(null);
@@ -50,7 +177,7 @@ export default function App() {
   const [editingId, setEditingId]         = useState(null);
   const [detailsId, setDetailsId]         = useState(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
-  const [activePanel, setActivePanel]     = useState(null); // 'summary' | 'budget' | 'report' | 'search'
+  const [activePanel, setActivePanel]     = useState(null);
   const [loading, setLoading]             = useState(false);
   const [selectedDate, setSelectedDate]   = useState(
     new Date().toISOString().split("T")[0]
@@ -58,14 +185,22 @@ export default function App() {
   const [form, setForm] = useState({ description: "", amount: "", category: "" });
   const descRef = useRef(null);
 
+  const apiFetch = (path, options = {}) =>
+    fetch(`${API_URL}${path}`, {
+      ...options,
+      headers: { ...authHeaders, ...(options.headers || {}) },
+    });
+
   useEffect(() => {
-    const url =
-      period === "date"
-        ? `${API_URL}/expenses?period=date&date=${selectedDate}`
-        : `${API_URL}/expenses?period=${period}`;
-    fetch(url)
-      .then(res => res.json())
-      .then(data => setExpenses(data))
+    const url = period === "date"
+      ? `/expenses?period=date&date=${selectedDate}`
+      : `/expenses?period=${period}`;
+    apiFetch(url)
+      .then(res => {
+        if (res.status === 401) { onLogout(); return []; }
+        return res.json();
+      })
+      .then(data => Array.isArray(data) && setExpenses(data))
       .catch(() => {});
   }, [period, selectedDate]);
 
@@ -75,38 +210,21 @@ export default function App() {
     descRef.current?.focus();
   };
 
-  const showToast = (text) => setToast(text);
-
-  const closeAllPanels = () => {
-    setDetailsId(null);
-    setActivePanel(null);
-  };
-
-  const handleKeyDown = (e) => {
-    if (e.key === "Enter") editingId ? saveEdit() : addExpense();
-  };
+  const showToast    = (text) => setToast(text);
+  const closeAllPanels = () => { setDetailsId(null); setActivePanel(null); };
 
   const addExpense = async () => {
     if (!form.description || !form.amount || !form.category) {
-      alert("Please fill in all fields.");
-      return;
+      alert("Please fill in all fields."); return;
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/expenses`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
+      const res        = await apiFetch("/expenses", { method: "POST", body: JSON.stringify(form) });
       const newExpense = await res.json();
-      if (period === "all" || period === "today") {
-        setExpenses(prev => [newExpense, ...prev]);
-      }
+      if (period === "all" || period === "today") setExpenses(prev => [newExpense, ...prev]);
       clearForm();
       showToast("Expense added");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const startEdit = (expense) => {
@@ -118,63 +236,50 @@ export default function App() {
 
   const saveEdit = async () => {
     if (!form.description || !form.amount || !form.category) {
-      alert("Please fill in all fields.");
-      return;
+      alert("Please fill in all fields."); return;
     }
     setLoading(true);
     try {
-      const res = await fetch(`${API_URL}/expenses/${editingId}`, {
-        method: "PUT",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(form),
-      });
+      const res     = await apiFetch(`/expenses/${editingId}`, { method: "PUT", body: JSON.stringify(form) });
       const updated = await res.json();
       setExpenses(prev => prev.map(e => (e.id === editingId ? updated : e)));
       clearForm();
       showToast("Expense updated");
-    } finally {
-      setLoading(false);
-    }
+    } finally { setLoading(false); }
   };
 
   const deleteExpense = async (id) => {
     if (!window.confirm("Delete this expense? This cannot be undone.")) return;
-    await fetch(`${API_URL}/expenses/${id}`, { method: "DELETE" });
+    await apiFetch(`/expenses/${id}`, { method: "DELETE" });
     setExpenses(prev => prev.filter(e => e.id !== id));
     closeAllPanels();
     showToast("Expense deleted");
   };
 
-  const fetchPanel = async (key, url) => {
+  const fetchPanel = async (key, path) => {
     closeAllPanels();
     try {
-      const res = await fetch(url);
+      const res  = await apiFetch(path);
       const data = await res.json();
-      if (key === "summary")  setSummary(data);
-      if (key === "budget")   setBudgetAlert(data);
-      if (key === "report")   setMonthlyReport(data);
-      if (key === "search")   setSearchFilter(data);
+      if (key === "summary") setSummary(data);
+      if (key === "budget")  setBudgetAlert(data);
+      if (key === "report")  setMonthlyReport(data);
+      if (key === "search")  setSearchFilter(data);
       setActivePanel(key);
-    } catch {
-      alert("Could not load data.");
-    }
+    } catch { alert("Could not load data."); }
   };
 
-  const getSummary      = () => fetchPanel("summary", `${API_URL}/expenses/summary?period=${period}`);
-  const getBudgetAlert  = () => fetchPanel("budget",  `${API_URL}/expenses/budget-alert?budget=1000&period=${period}&date=${selectedDate}`);
-  const getMonthlyReport= () => fetchPanel("report",  `${API_URL}/expenses/monthly-report?period=${period}`);
-  const getSearchFilter = () => fetchPanel("search",  `${API_URL}/expenses/search-filter?search=${encodeURIComponent(searchTerm)}&period=${period}`);
+  const getSummary       = () => fetchPanel("summary", `/expenses/summary?period=${period}`);
+  const getBudgetAlert   = () => fetchPanel("budget",  `/expenses/budget-alert?budget=1000&period=${period}&date=${selectedDate}`);
+  const getMonthlyReport = () => fetchPanel("report",  `/expenses/monthly-report?period=${period}`);
+  const getSearchFilter  = () => fetchPanel("search",  `/expenses/search-filter?search=${encodeURIComponent(searchTerm)}&period=${period}`);
 
-  const changePeriod = (p) => {
-    closeAllPanels();
-    setPeriod(p);
-    setMobileFiltersOpen(false);
-  };
+  const changePeriod = (p) => { closeAllPanels(); setPeriod(p); setMobileFiltersOpen(false); };
 
-  const total = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
-  const selectedDetails = expenses.find(e => e.id === detailsId);
-  const budgetPct = Math.min((total / 1000) * 100, 100);
+  const total      = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const budgetPct  = Math.min((total / 1000) * 100, 100);
   const budgetColor = budgetPct >= 100 ? "danger" : budgetPct >= 80 ? "warning" : "ok";
+  const selectedDetails = expenses.find(e => e.id === detailsId);
 
   return (
     <div className="app">
@@ -182,6 +287,10 @@ export default function App() {
 
       {/* ── Header ── */}
       <header className="app-header">
+        <div className="header-top-row">
+          <span className="header-user">👤 {userEmail}</span>
+          <button className="btn-logout" onClick={onLogout}>Sign Out</button>
+        </div>
         <div className="header-icon" aria-hidden="true">💸</div>
         <h1>Expense Tracker</h1>
         <p className="subtitle">Know where your money goes — before it's gone.</p>
@@ -238,10 +347,12 @@ export default function App() {
       </div>
 
       {/* ── Add / Edit Form ── */}
-      <section className={`form${editingId ? " editing" : ""}`} aria-label={editingId ? "Edit expense" : "Add expense"}>
+      <section className={`form${editingId ? " editing" : ""}`}>
         <h2 className="form-title">{editingId ? "✏️ Edit Expense" : "Add Expense"}</h2>
-
-        <div className="form-row" onKeyDown={handleKeyDown}>
+        <div
+          className="form-row"
+          onKeyDown={e => e.key === "Enter" && (editingId ? saveEdit() : addExpense())}
+        >
           <label>
             Description
             <input
@@ -275,9 +386,7 @@ export default function App() {
             </select>
           </label>
         </div>
-
         <p className="required-note">All fields required · Press Enter to submit</p>
-
         {editingId ? (
           <div className="button-row">
             <button className="btn-primary" onClick={saveEdit} disabled={loading}>
@@ -293,7 +402,7 @@ export default function App() {
       </section>
 
       {/* ── Expense List ── */}
-      <section className="expense-list" aria-label="Expenses">
+      <section className="expense-list">
         {expenses.length === 0 ? (
           <div className="empty-state">
             <span className="empty-icon">🧾</span>
@@ -323,14 +432,18 @@ export default function App() {
                         className="icon-btn"
                         title="Details"
                         aria-label="View details"
-                        onClick={() => detailsId === expense.id ? setDetailsId(null) : (closeAllPanels(), setDetailsId(expense.id))}
+                        onClick={() =>
+                          detailsId === expense.id
+                            ? setDetailsId(null)
+                            : (closeAllPanels(), setDetailsId(expense.id))
+                        }
                       >
                         ℹ️
                       </button>
                       <button
                         className="icon-btn"
                         title="Edit"
-                        aria-label="Edit expense"
+                        aria-label="Edit"
                         onClick={() => startEdit(expense)}
                       >
                         ✏️
@@ -338,7 +451,7 @@ export default function App() {
                       <button
                         className="icon-btn danger"
                         title="Delete"
-                        aria-label="Delete expense"
+                        aria-label="Delete"
                         onClick={() => deleteExpense(expense.id)}
                       >
                         🗑️
@@ -368,17 +481,11 @@ export default function App() {
         )}
       </section>
 
-      {/* ── Insights Bar ── */}
-      <section className="insights-bar" aria-label="Insights">
-        <button className={`insight-btn${activePanel === "summary" ? " active" : ""}`} onClick={getSummary}>
-          📊 Summary
-        </button>
-        <button className={`insight-btn${activePanel === "budget" ? " active" : ""}`} onClick={getBudgetAlert}>
-          🔔 Budget Alert
-        </button>
-        <button className={`insight-btn${activePanel === "report" ? " active" : ""}`} onClick={getMonthlyReport}>
-          📅 Monthly Report
-        </button>
+      {/* ── Insights ── */}
+      <section className="insights-bar">
+        <button className={`insight-btn${activePanel === "summary" ? " active" : ""}`} onClick={getSummary}>📊 Summary</button>
+        <button className={`insight-btn${activePanel === "budget"  ? " active" : ""}`} onClick={getBudgetAlert}>🔔 Budget Alert</button>
+        <button className={`insight-btn${activePanel === "report"  ? " active" : ""}`} onClick={getMonthlyReport}>📅 Monthly Report</button>
       </section>
 
       <div className="search-bar">
@@ -430,15 +537,15 @@ export default function App() {
             <button className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
           </div>
           <div className="stat-grid">
-            <StatCard label="Total"     value={`$${Number(monthlyReport.total_spending).toFixed(2)}`} />
-            <StatCard label="Count"     value={monthlyReport.expense_count} />
-            <StatCard label="Average"   value={`$${Number(monthlyReport.average_expense).toFixed(2)}`} />
+            <StatCard label="Total"   value={`$${Number(monthlyReport.total_spending).toFixed(2)}`} />
+            <StatCard label="Count"   value={monthlyReport.expense_count} />
+            <StatCard label="Average" value={`$${Number(monthlyReport.average_expense).toFixed(2)}`} />
           </div>
           <h4 className="section-label">By Category</h4>
           <div className="category-list">
             {Object.entries(monthlyReport.category_totals || {}).map(([cat, amt]) => {
               const meta = CATEGORY_META[cat] || CATEGORY_META["Other"];
-              const pct = total > 0 ? (amt / total) * 100 : 0;
+              const pct  = total > 0 ? (amt / total) * 100 : 0;
               return (
                 <div key={cat} className={`cat-row ${meta.color}`}>
                   <span className="cat-row-label">{meta.icon} {cat}</span>
