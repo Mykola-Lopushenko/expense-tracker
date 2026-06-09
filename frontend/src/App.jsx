@@ -39,11 +39,11 @@ function StatCard({ label, value }) {
 
 // ── Auth Screen ────────────────────────────────────────────
 function AuthScreen({ onAuth }) {
-  const [mode, setMode]       = useState("login"); // 'login' | 'register'
-  const [email, setEmail]     = useState("");
+  const [mode, setMode]         = useState("login");
+  const [email, setEmail]       = useState("");
   const [password, setPassword] = useState("");
-  const [error, setError]     = useState("");
-  const [loading, setLoading] = useState(false);
+  const [error, setError]       = useState("");
+  const [loading, setLoading]   = useState(false);
 
   const submit = async () => {
     setError("");
@@ -140,7 +140,7 @@ function AuthScreen({ onAuth }) {
 
 // ── Main App ───────────────────────────────────────────────
 export default function App() {
-  const [token, setToken]   = useState(() => sessionStorage.getItem("et_token") || "");
+  const [token, setToken]       = useState(() => sessionStorage.getItem("et_token") || "");
   const [userEmail, setUserEmail] = useState(() => sessionStorage.getItem("et_email") || "");
 
   const handleAuth = (t, email) => {
@@ -167,21 +167,23 @@ function ExpenseApp({ token, userEmail, onLogout }) {
   const authHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
   const [expenses, setExpenses]           = useState([]);
+  const [monthlyTotal, setMonthlyTotal]   = useState(0);
   const [summary, setSummary]             = useState(null);
   const [budgetAlert, setBudgetAlert]     = useState(null);
   const [monthlyReport, setMonthlyReport] = useState(null);
   const [searchFilter, setSearchFilter]   = useState(null);
   const [searchTerm, setSearchTerm]       = useState("");
-  const [period, setPeriod]               = useState("all");
+  const [period, setPeriod]               = useState("today");
   const [toast, setToast]                 = useState("");
   const [editingId, setEditingId]         = useState(null);
   const [detailsId, setDetailsId]         = useState(null);
   const [mobileFiltersOpen, setMobileFiltersOpen] = useState(false);
   const [activePanel, setActivePanel]     = useState(null);
   const [loading, setLoading]             = useState(false);
-  const [selectedDate, setSelectedDate] = useState(() => {
+  const [selectedDate, setSelectedDate]   = useState(() => {
     const now = new Date();
-    return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-${String(now.getDate()).padStart(2, "0")}`;
+    now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+    return now.toISOString().split("T")[0];
   });
   const [form, setForm] = useState({ description: "", amount: "", category: "" });
   const descRef = useRef(null);
@@ -192,6 +194,7 @@ function ExpenseApp({ token, userEmail, onLogout }) {
       headers: { ...authHeaders, ...(options.headers || {}) },
     });
 
+  // Fetch expenses for selected period
   useEffect(() => {
     const url = period === "date"
       ? `/expenses?period=date&date=${selectedDate}`
@@ -205,13 +208,26 @@ function ExpenseApp({ token, userEmail, onLogout }) {
       .catch(() => {});
   }, [period, selectedDate]);
 
+  // Always fetch monthly total for budget bar
+  useEffect(() => {
+    apiFetch("/expenses?period=month")
+      .then(res => res.json())
+      .then(data => {
+        if (Array.isArray(data)) {
+          const sum = data.reduce((acc, e) => acc + Number(e.amount), 0);
+          setMonthlyTotal(sum);
+        }
+      })
+      .catch(() => {});
+  }, [expenses]); // re-fetch when expenses change so bar updates after add/delete
+
   const clearForm = () => {
     setForm({ description: "", amount: "", category: "" });
     setEditingId(null);
     descRef.current?.focus();
   };
 
-  const showToast    = (text) => setToast(text);
+  const showToast      = (text) => setToast(text);
   const closeAllPanels = () => { setDetailsId(null); setActivePanel(null); };
 
   const addExpense = async () => {
@@ -277,9 +293,9 @@ function ExpenseApp({ token, userEmail, onLogout }) {
 
   const changePeriod = (p) => { closeAllPanels(); setPeriod(p); setMobileFiltersOpen(false); };
 
-  const total      = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
-  const budgetPct  = Math.min((total / 1000) * 100, 100);
-  const budgetColor = budgetPct >= 100 ? "danger" : budgetPct >= 80 ? "warning" : "ok";
+  const total           = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const budgetPct       = Math.min((monthlyTotal / 1000) * 100, 100);
+  const budgetColor     = budgetPct >= 100 ? "danger" : budgetPct >= 80 ? "warning" : "ok";
   const selectedDetails = expenses.find(e => e.id === detailsId);
 
   return (
@@ -306,7 +322,7 @@ function ExpenseApp({ token, userEmail, onLogout }) {
               <div className="budget-bar-fill" style={{ width: `${budgetPct}%` }} />
             </div>
             <span className="budget-bar-label">
-              ${(1000 - total).toFixed(2)} of $1,000 budget remaining
+              ${(1000 - monthlyTotal).toFixed(2)} of $1,000 monthly budget remaining
             </span>
           </div>
         </div>
@@ -546,7 +562,7 @@ function ExpenseApp({ token, userEmail, onLogout }) {
           <div className="category-list">
             {Object.entries(monthlyReport.category_totals || {}).map(([cat, amt]) => {
               const meta = CATEGORY_META[cat] || CATEGORY_META["Other"];
-              const pct  = total > 0 ? (amt / total) * 100 : 0;
+              const pct  = monthlyTotal > 0 ? (amt / monthlyTotal) * 100 : 0;
               return (
                 <div key={cat} className={`cat-row ${meta.color}`}>
                   <span className="cat-row-label">{meta.icon} {cat}</span>
