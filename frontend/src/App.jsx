@@ -1,7 +1,8 @@
 import { useEffect, useState, useRef } from "react";
 import "./App.css";
 
-const API_URL = "https://expense-tracker-backend-v11c.onrender.com";
+const API_URL   = "https://expense-tracker-backend-v11c.onrender.com";
+const TZ_OFFSET = new Date().getTimezoneOffset();
 
 const CATEGORY_META = {
   Food:      { icon: "🍔", color: "cat-food" },
@@ -49,15 +50,14 @@ function AuthScreen({ onAuth }) {
     setError("");
     if (!email || !password) { setError("Please fill in all fields."); return; }
     if (mode === "register" && password.length < 8) {
-      setError("Password must be at least 8 characters.");
-      return;
+      setError("Password must be at least 8 characters."); return;
     }
     setLoading(true);
     try {
       const res  = await fetch(`${API_URL}/auth/${mode}`, {
-        method:  "POST",
+        method: "POST",
         headers: { "Content-Type": "application/json" },
-        body:    JSON.stringify({ email, password }),
+        body: JSON.stringify({ email, password }),
       });
       const data = await res.json();
       if (!res.ok) { setError(data.error || "Something went wrong."); return; }
@@ -69,69 +69,25 @@ function AuthScreen({ onAuth }) {
     }
   };
 
-  const handleKey = (e) => { if (e.key === "Enter") submit(); };
-
   return (
     <div className="auth-wrap">
       <div className="auth-card">
-        <div className="auth-logo" aria-hidden="true">💸</div>
+        <div className="auth-logo">💸</div>
         <h1 className="auth-title">Expense Tracker</h1>
-        <p className="auth-subtitle">
-          {mode === "login" ? "Sign in to your account" : "Create your account"}
-        </p>
-
+        <p className="auth-subtitle">{mode === "login" ? "Sign in to your account" : "Create your account"}</p>
         <div className="auth-tabs">
-          <button
-            className={`auth-tab${mode === "login" ? " active" : ""}`}
-            onClick={() => { setMode("login"); setError(""); }}
-          >
-            Sign In
-          </button>
-          <button
-            className={`auth-tab${mode === "register" ? " active" : ""}`}
-            onClick={() => { setMode("register"); setError(""); }}
-          >
-            Register
-          </button>
+          <button className={`auth-tab${mode === "login" ? " active" : ""}`} onClick={() => { setMode("login"); setError(""); }}>Sign In</button>
+          <button className={`auth-tab${mode === "register" ? " active" : ""}`} onClick={() => { setMode("register"); setError(""); }}>Register</button>
         </div>
-
-        <div className="auth-fields" onKeyDown={handleKey}>
-          <label className="auth-label">
-            Email
-            <input
-              type="email"
-              placeholder="you@example.com"
-              value={email}
-              autoComplete="email"
-              onChange={e => setEmail(e.target.value)}
-            />
-          </label>
-          <label className="auth-label">
-            Password
-            <input
-              type="password"
-              placeholder={mode === "register" ? "Min. 8 characters" : "Your password"}
-              value={password}
-              autoComplete={mode === "login" ? "current-password" : "new-password"}
-              onChange={e => setPassword(e.target.value)}
-            />
-          </label>
+        <div className="auth-fields" onKeyDown={e => e.key === "Enter" && submit()}>
+          <label className="auth-label">Email<input type="email" placeholder="you@example.com" value={email} autoComplete="email" onChange={e => setEmail(e.target.value)} /></label>
+          <label className="auth-label">Password<input type="password" placeholder={mode === "register" ? "Min. 8 characters" : "Your password"} value={password} autoComplete={mode === "login" ? "current-password" : "new-password"} onChange={e => setPassword(e.target.value)} /></label>
         </div>
-
         {error && <p className="auth-error">{error}</p>}
-
-        <button className="btn-primary full" onClick={submit} disabled={loading}>
-          {loading ? "Please wait…" : mode === "login" ? "Sign In" : "Create Account"}
-        </button>
-
+        <button className="btn-primary full" onClick={submit} disabled={loading}>{loading ? "Please wait…" : mode === "login" ? "Sign In" : "Create Account"}</button>
         <p className="auth-switch">
           {mode === "login" ? "No account yet? " : "Already have an account? "}
-          <button
-            className="auth-link"
-            onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}
-          >
-            {mode === "login" ? "Register" : "Sign In"}
-          </button>
+          <button className="auth-link" onClick={() => { setMode(mode === "login" ? "register" : "login"); setError(""); }}>{mode === "login" ? "Register" : "Sign In"}</button>
         </p>
       </div>
     </div>
@@ -140,34 +96,105 @@ function AuthScreen({ onAuth }) {
 
 // ── Main App ───────────────────────────────────────────────
 export default function App() {
-  const [token, setToken]       = useState(() => sessionStorage.getItem("et_token") || "");
+  const [token, setToken]         = useState(() => sessionStorage.getItem("et_token") || "");
   const [userEmail, setUserEmail] = useState(() => sessionStorage.getItem("et_email") || "");
 
   const handleAuth = (t, email) => {
     sessionStorage.setItem("et_token", t);
     sessionStorage.setItem("et_email", email);
-    setToken(t);
-    setUserEmail(email);
+    setToken(t); setUserEmail(email);
   };
 
   const handleLogout = () => {
     sessionStorage.removeItem("et_token");
     sessionStorage.removeItem("et_email");
-    setToken("");
-    setUserEmail("");
+    setToken(""); setUserEmail("");
   };
 
   if (!token) return <AuthScreen onAuth={handleAuth} />;
-
   return <ExpenseApp token={token} userEmail={userEmail} onLogout={handleLogout} />;
+}
+
+// ── Budget Settings Panel ──────────────────────────────────
+function BudgetSettings({ budget, budgetPeriod, onSave, onClose }) {
+  const [amount, setAmount]   = useState(String(budget));
+  const [bPeriod, setBPeriod] = useState(budgetPeriod);
+
+  const save = () => {
+    const val = parseFloat(amount);
+    if (!val || val <= 0) { alert("Please enter a valid budget amount."); return; }
+    onSave(val, bPeriod);
+    onClose();
+  };
+
+  return (
+    <div className="settings-overlay" onClick={onClose}>
+      <div className="settings-panel" onClick={e => e.stopPropagation()}>
+        <div className="panel-header">
+          <h3>⚙️ Budget Settings</h3>
+          <button className="panel-close" onClick={onClose}>✕</button>
+        </div>
+
+        <label className="settings-label">
+          Budget Amount ($)
+          <input
+            type="number"
+            min="1"
+            step="50"
+            value={amount}
+            onChange={e => setAmount(e.target.value)}
+            onKeyDown={e => e.key === "Enter" && save()}
+          />
+        </label>
+
+        <label className="settings-label" style={{ marginTop: "16px" }}>
+          Budget Period
+        </label>
+        <div className="period-toggle">
+          <button
+            className={`period-toggle-btn${bPeriod === "week" ? " active" : ""}`}
+            onClick={() => setBPeriod("week")}
+          >
+            📅 Weekly
+          </button>
+          <button
+            className={`period-toggle-btn${bPeriod === "month" ? " active" : ""}`}
+            onClick={() => setBPeriod("month")}
+          >
+            🗓️ Monthly
+          </button>
+        </div>
+
+        <p className="settings-hint">
+          Budget resets every {bPeriod === "week" ? "week" : "month"} — tracking your {bPeriod === "week" ? "weekly" : "monthly"} spending.
+        </p>
+
+        <button className="btn-primary full" onClick={save} style={{ marginTop: "20px" }}>
+          Save Settings
+        </button>
+      </div>
+    </div>
+  );
 }
 
 // ── Expense App (authenticated) ────────────────────────────
 function ExpenseApp({ token, userEmail, onLogout }) {
   const authHeaders = { "Content-Type": "application/json", Authorization: `Bearer ${token}` };
 
+  // Budget settings — persisted in localStorage
+  const [budget, setBudget]           = useState(() => parseFloat(localStorage.getItem("et_budget") || "1000"));
+  const [budgetPeriod, setBudgetPeriod] = useState(() => localStorage.getItem("et_budget_period") || "week");
+  const [showSettings, setShowSettings] = useState(false);
+
+  const saveBudgetSettings = (amount, period) => {
+    setBudget(amount);
+    setBudgetPeriod(period);
+    localStorage.setItem("et_budget", String(amount));
+    localStorage.setItem("et_budget_period", period);
+  };
+
   const [expenses, setExpenses]           = useState([]);
-  const [monthlyTotal, setMonthlyTotal]   = useState(0);
+  const [budgetTotal, setBudgetTotal]     = useState(0);
   const [summary, setSummary]             = useState(null);
   const [budgetAlert, setBudgetAlert]     = useState(null);
   const [monthlyReport, setMonthlyReport] = useState(null);
@@ -188,11 +215,13 @@ function ExpenseApp({ token, userEmail, onLogout }) {
   const [form, setForm] = useState({ description: "", amount: "", category: "" });
   const descRef = useRef(null);
 
-  const apiFetch = (path, options = {}) =>
-    fetch(`${API_URL}${path}`, {
+  const apiFetch = (path, options = {}) => {
+    const sep = path.includes("?") ? "&" : "?";
+    return fetch(`${API_URL}${path}${sep}tzOffset=${TZ_OFFSET}`, {
       ...options,
       headers: { ...authHeaders, ...(options.headers || {}) },
     });
+  };
 
   // Fetch expenses for selected period
   useEffect(() => {
@@ -200,47 +229,35 @@ function ExpenseApp({ token, userEmail, onLogout }) {
       ? `/expenses?period=date&date=${selectedDate}`
       : `/expenses?period=${period}`;
     apiFetch(url)
-      .then(res => {
-        if (res.status === 401) { onLogout(); return []; }
-        return res.json();
-      })
+      .then(res => { if (res.status === 401) { onLogout(); return []; } return res.json(); })
       .then(data => Array.isArray(data) && setExpenses(data))
       .catch(() => {});
   }, [period, selectedDate]);
 
-  // Always fetch monthly total for budget bar
+  // Fetch budget period total (week or month) for the budget bar
   useEffect(() => {
-    apiFetch("/expenses?period=month")
+    apiFetch(`/expenses?period=${budgetPeriod}`)
       .then(res => res.json())
       .then(data => {
         if (Array.isArray(data)) {
-          const sum = data.reduce((acc, e) => acc + Number(e.amount), 0);
-          setMonthlyTotal(sum);
+          setBudgetTotal(data.reduce((acc, e) => acc + Number(e.amount), 0));
         }
       })
       .catch(() => {});
-  }, [expenses]); // re-fetch when expenses change so bar updates after add/delete
+  }, [expenses, budgetPeriod]);
 
-  const clearForm = () => {
-    setForm({ description: "", amount: "", category: "" });
-    setEditingId(null);
-    descRef.current?.focus();
-  };
-
+  const clearForm      = () => { setForm({ description: "", amount: "", category: "" }); setEditingId(null); descRef.current?.focus(); };
   const showToast      = (text) => setToast(text);
   const closeAllPanels = () => { setDetailsId(null); setActivePanel(null); };
 
   const addExpense = async () => {
-    if (!form.description || !form.amount || !form.category) {
-      alert("Please fill in all fields."); return;
-    }
+    if (!form.description || !form.amount || !form.category) { alert("Please fill in all fields."); return; }
     setLoading(true);
     try {
       const res        = await apiFetch("/expenses", { method: "POST", body: JSON.stringify(form) });
       const newExpense = await res.json();
       if (period === "all" || period === "today") setExpenses(prev => [newExpense, ...prev]);
-      clearForm();
-      showToast("Expense added");
+      clearForm(); showToast("Expense added");
     } finally { setLoading(false); }
   };
 
@@ -252,16 +269,13 @@ function ExpenseApp({ token, userEmail, onLogout }) {
   };
 
   const saveEdit = async () => {
-    if (!form.description || !form.amount || !form.category) {
-      alert("Please fill in all fields."); return;
-    }
+    if (!form.description || !form.amount || !form.category) { alert("Please fill in all fields."); return; }
     setLoading(true);
     try {
       const res     = await apiFetch(`/expenses/${editingId}`, { method: "PUT", body: JSON.stringify(form) });
       const updated = await res.json();
       setExpenses(prev => prev.map(e => (e.id === editingId ? updated : e)));
-      clearForm();
-      showToast("Expense updated");
+      clearForm(); showToast("Expense updated");
     } finally { setLoading(false); }
   };
 
@@ -269,8 +283,7 @@ function ExpenseApp({ token, userEmail, onLogout }) {
     if (!window.confirm("Delete this expense? This cannot be undone.")) return;
     await apiFetch(`/expenses/${id}`, { method: "DELETE" });
     setExpenses(prev => prev.filter(e => e.id !== id));
-    closeAllPanels();
-    showToast("Expense deleted");
+    closeAllPanels(); showToast("Expense deleted");
   };
 
   const fetchPanel = async (key, path) => {
@@ -287,31 +300,51 @@ function ExpenseApp({ token, userEmail, onLogout }) {
   };
 
   const getSummary       = () => fetchPanel("summary", `/expenses/summary?period=${period}`);
-  const getBudgetAlert   = () => fetchPanel("budget",  `/expenses/budget-alert?budget=1000&period=${period}&date=${selectedDate}`);
+  const getBudgetAlert   = () => fetchPanel("budget",  `/expenses/budget-alert?budget=${budget}&period=${budgetPeriod}&date=${selectedDate}`);
   const getMonthlyReport = () => fetchPanel("report",  `/expenses/monthly-report?period=${period}`);
   const getSearchFilter  = () => fetchPanel("search",  `/expenses/search-filter?search=${encodeURIComponent(searchTerm)}&period=${period}`);
 
-  const changePeriod = (p) => { closeAllPanels(); setPeriod(p); setMobileFiltersOpen(false); };
+  const changePeriod = (p) => {
+    closeAllPanels();
+    setPeriod(p);
+    setMobileFiltersOpen(false);
+    if (p === "today") {
+      const now = new Date();
+      now.setMinutes(now.getMinutes() - now.getTimezoneOffset());
+      setSelectedDate(now.toISOString().split("T")[0]);
+    }
+  };
 
-  const total           = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
-  const budgetPct       = Math.min((monthlyTotal / 1000) * 100, 100);
-  const budgetColor     = budgetPct >= 100 ? "danger" : budgetPct >= 80 ? "warning" : "ok";
+  const total       = expenses.reduce((sum, e) => sum + Number(e.amount), 0);
+  const budgetPct   = Math.min((budgetTotal / budget) * 100, 100);
+  const budgetColor = budgetPct >= 100 ? "danger" : budgetPct >= 80 ? "warning" : "ok";
   const selectedDetails = expenses.find(e => e.id === detailsId);
 
   return (
     <div className="app">
       <Toast message={toast} onDone={() => setToast("")} />
 
+      {showSettings && (
+        <BudgetSettings
+          budget={budget}
+          budgetPeriod={budgetPeriod}
+          onSave={saveBudgetSettings}
+          onClose={() => setShowSettings(false)}
+        />
+      )}
+
       {/* ── Header ── */}
       <header className="app-header">
         <div className="header-top-row">
           <span className="header-user">👤 {userEmail}</span>
-          <button className="btn-logout" onClick={onLogout}>Sign Out</button>
+          <div style={{ display: "flex", gap: "8px" }}>
+            <button className="btn-logout" onClick={() => setShowSettings(true)}>⚙️</button>
+            <button className="btn-logout" onClick={onLogout}>Sign Out</button>
+          </div>
         </div>
-        <div className="header-icon" aria-hidden="true">💸</div>
+        <div className="header-icon">💸</div>
         <h1>Expense Tracker</h1>
         <p className="subtitle">Know where your money goes — before it's gone.</p>
-
         <div className="hero-stats">
           <div className="hero-stat">
             <span className="hero-stat-num">${total.toFixed(2)}</span>
@@ -322,7 +355,7 @@ function ExpenseApp({ token, userEmail, onLogout }) {
               <div className="budget-bar-fill" style={{ width: `${budgetPct}%` }} />
             </div>
             <span className="budget-bar-label">
-              ${(1000 - monthlyTotal).toFixed(2)} of $1,000 monthly budget remaining
+              ${(budget - budgetTotal).toFixed(2)} of ${budget.toLocaleString()} {budgetPeriod === "week" ? "weekly" : "monthly"} budget remaining
             </span>
           </div>
         </div>
@@ -330,91 +363,45 @@ function ExpenseApp({ token, userEmail, onLogout }) {
 
       {/* ── Period Filter ── */}
       <div className="filter-header">
-        <span className="filter-label">
-          Viewing: <strong>{PERIOD_LABELS[period]}</strong>
-        </span>
-        <button
-          className="filter-menu-btn"
-          aria-label="Toggle filters"
-          onClick={() => setMobileFiltersOpen(o => !o)}
-        >
-          ☰
-        </button>
+        <span className="filter-label">Viewing: <strong>{PERIOD_LABELS[period]}</strong></span>
+        <button className="filter-menu-btn" onClick={() => setMobileFiltersOpen(o => !o)}>☰</button>
       </div>
 
       <div className={`filters-panel${mobileFiltersOpen ? " open" : ""}`}>
         <div className="period-buttons">
           {["all", "today", "week", "month"].map(p => (
-            <button
-              key={p}
-              className={`period-btn${period === p ? " active" : ""}`}
-              onClick={() => changePeriod(p)}
-            >
+            <button key={p} className={`period-btn${period === p ? " active" : ""}`} onClick={() => changePeriod(p)}>
               {p === "all" ? "All" : p === "today" ? "Today" : p === "week" ? "This Week" : "This Month"}
             </button>
           ))}
         </div>
         <div className="date-filter">
-          <input
-            type="date"
-            value={selectedDate}
-            onChange={e => { setSelectedDate(e.target.value); changePeriod("date"); }}
-          />
+          <input type="date" value={selectedDate} onChange={e => { setSelectedDate(e.target.value); changePeriod("date"); }} />
         </div>
       </div>
 
       {/* ── Add / Edit Form ── */}
       <section className={`form${editingId ? " editing" : ""}`}>
         <h2 className="form-title">{editingId ? "✏️ Edit Expense" : "Add Expense"}</h2>
-        <div
-          className="form-row"
-          onKeyDown={e => e.key === "Enter" && (editingId ? saveEdit() : addExpense())}
-        >
-          <label>
-            Description
-            <input
-              ref={descRef}
-              placeholder="e.g. Coffee"
-              value={form.description}
-              onChange={e => setForm({ ...form, description: e.target.value })}
-            />
-          </label>
-          <label>
-            Amount ($)
-            <input
-              placeholder="0.00"
-              type="number"
-              min="0"
-              step="0.01"
-              value={form.amount}
-              onChange={e => setForm({ ...form, amount: e.target.value })}
-            />
-          </label>
+        <div className="form-row" onKeyDown={e => e.key === "Enter" && (editingId ? saveEdit() : addExpense())}>
+          <label>Description<input ref={descRef} placeholder="e.g. Coffee" value={form.description} onChange={e => setForm({ ...form, description: e.target.value })} /></label>
+          <label>Amount ($)<input placeholder="0.00" type="number" min="0" step="0.01" value={form.amount} onChange={e => setForm({ ...form, amount: e.target.value })} /></label>
           <label>
             Category
-            <select
-              value={form.category}
-              onChange={e => setForm({ ...form, category: e.target.value })}
-            >
+            <select value={form.category} onChange={e => setForm({ ...form, category: e.target.value })}>
               <option value="">Select</option>
-              {Object.keys(CATEGORY_META).map(c => (
-                <option key={c} value={c}>{CATEGORY_META[c].icon} {c}</option>
-              ))}
+              {Object.keys(CATEGORY_META).map(c => <option key={c} value={c}>{CATEGORY_META[c].icon} {c}</option>)}
             </select>
           </label>
         </div>
         <p className="required-note">All fields required · Press Enter to submit</p>
         {editingId ? (
           <div className="button-row">
-            <button className="btn-primary" onClick={saveEdit} disabled={loading}>
-              {loading ? "Saving…" : "Save Changes"}
-            </button>
+            <button className="btn-primary" onClick={saveEdit} disabled={loading}>{loading ? "Saving…" : "Save Changes"}</button>
             <button className="btn-ghost" onClick={clearForm}>Cancel</button>
           </div>
         ) : (
-          <button className="btn-primary full" onClick={addExpense} disabled={loading}>
-            {loading ? "Adding…" : "+ Add Expense"}
-          </button>
+          <button className="btn-primary full" onClick={addExpense} disabled={loading}>{loading ? "Adding…" : "+ Add Expense"}</button>
         )}
       </section>
 
@@ -430,13 +417,10 @@ function ExpenseApp({ token, userEmail, onLogout }) {
           expenses.map(expense => {
             const meta = CATEGORY_META[expense.category] || CATEGORY_META["Other"];
             return (
-              <div
-                className={`expense-item ${meta.color}${detailsId === expense.id ? " expanded" : ""}`}
-                key={expense.id}
-              >
+              <div className={`expense-item ${meta.color}${detailsId === expense.id ? " expanded" : ""}`} key={expense.id}>
                 <div className="expense-top">
                   <div className="expense-info">
-                    <span className="expense-icon" aria-hidden="true">{meta.icon}</span>
+                    <span className="expense-icon">{meta.icon}</span>
                     <div>
                       <span className="expense-desc">{expense.description}</span>
                       <span className={`cat-badge ${meta.color}`}>{expense.category}</span>
@@ -445,51 +429,23 @@ function ExpenseApp({ token, userEmail, onLogout }) {
                   <div className="expense-right">
                     <span className="expense-amount">${Number(expense.amount).toFixed(2)}</span>
                     <div className="expense-actions">
-                      <button
-                        className="icon-btn"
-                        title="Details"
-                        aria-label="View details"
-                        onClick={() =>
-                          detailsId === expense.id
-                            ? setDetailsId(null)
-                            : (closeAllPanels(), setDetailsId(expense.id))
-                        }
-                      >
-                        ℹ️
-                      </button>
-                      <button
-                        className="icon-btn"
-                        title="Edit"
-                        aria-label="Edit"
-                        onClick={() => startEdit(expense)}
-                      >
-                        ✏️
-                      </button>
-                      <button
-                        className="icon-btn danger"
-                        title="Delete"
-                        aria-label="Delete"
-                        onClick={() => deleteExpense(expense.id)}
-                      >
-                        🗑️
-                      </button>
+                      <button className="icon-btn" title="Details" onClick={() => detailsId === expense.id ? setDetailsId(null) : (closeAllPanels(), setDetailsId(expense.id))}>ℹ️</button>
+                      <button className="icon-btn" title="Edit" onClick={() => startEdit(expense)}>✏️</button>
+                      <button className="icon-btn danger" title="Delete" onClick={() => deleteExpense(expense.id)}>🗑️</button>
                     </div>
                   </div>
                 </div>
-
                 {detailsId === expense.id && selectedDetails && (
                   <div className="details-inline">
                     <div className="details-grid">
                       <span className="detail-label">Date</span>
-                      <span>{new Date(selectedDetails.date).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric" })}</span>
+                      <span>{new Date(new Date(selectedDetails.date).getTime() + TZ_OFFSET * 60 * 1000).toLocaleDateString("en-US", { year: "numeric", month: "long", day: "numeric", timeZone: "UTC" })}</span>
                       <span className="detail-label">Category</span>
                       <span>{meta.icon} {selectedDetails.category}</span>
                       <span className="detail-label">Amount</span>
                       <span>${Number(selectedDetails.amount).toFixed(2)}</span>
                     </div>
-                    <button className="btn-primary" style={{ marginTop: "12px" }} onClick={() => startEdit(selectedDetails)}>
-                      Edit This Expense
-                    </button>
+                    <button className="btn-primary" style={{ marginTop: "12px" }} onClick={() => startEdit(selectedDetails)}>Edit This Expense</button>
                   </div>
                 )}
               </div>
@@ -506,22 +462,14 @@ function ExpenseApp({ token, userEmail, onLogout }) {
       </section>
 
       <div className="search-bar">
-        <input
-          placeholder="Search by name, category, or amount…"
-          value={searchTerm}
-          onChange={e => setSearchTerm(e.target.value)}
-          onKeyDown={e => e.key === "Enter" && getSearchFilter()}
-        />
+        <input placeholder="Search by name, category, or amount…" value={searchTerm} onChange={e => setSearchTerm(e.target.value)} onKeyDown={e => e.key === "Enter" && getSearchFilter()} />
         <button className="btn-search" onClick={getSearchFilter}>Search</button>
       </div>
 
       {/* ── Panels ── */}
       {activePanel === "summary" && summary && (
         <div className="panel">
-          <div className="panel-header">
-            <h3>📊 Data Summary</h3>
-            <button className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
-          </div>
+          <div className="panel-header"><h3>📊 Data Summary</h3><button className="panel-close" onClick={() => setActivePanel(null)}>✕</button></div>
           <div className="stat-grid">
             <StatCard label="Average" value={`$${summary.descriptive_statistics?.amount?.mean?.toFixed(2) ?? "—"}`} />
             <StatCard label="Minimum" value={`$${summary.descriptive_statistics?.amount?.min?.toFixed(2) ?? "—"}`} />
@@ -533,10 +481,7 @@ function ExpenseApp({ token, userEmail, onLogout }) {
 
       {activePanel === "budget" && budgetAlert && (
         <div className={`panel panel-budget panel-budget-${budgetAlert.status}`}>
-          <div className="panel-header">
-            <h3>🔔 Budget Alert</h3>
-            <button className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
-          </div>
+          <div className="panel-header"><h3>🔔 Budget Alert</h3><button className="panel-close" onClick={() => setActivePanel(null)}>✕</button></div>
           <div className="budget-status-badge">{budgetAlert.status.replace(/_/g, " ")}</div>
           <p className="budget-msg">{budgetAlert.message}</p>
           <div className="stat-grid">
@@ -549,10 +494,7 @@ function ExpenseApp({ token, userEmail, onLogout }) {
 
       {activePanel === "report" && monthlyReport && (
         <div className="panel">
-          <div className="panel-header">
-            <h3>📅 Monthly Report</h3>
-            <button className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
-          </div>
+          <div className="panel-header"><h3>📅 Monthly Report</h3><button className="panel-close" onClick={() => setActivePanel(null)}>✕</button></div>
           <div className="stat-grid">
             <StatCard label="Total"   value={`$${Number(monthlyReport.total_spending).toFixed(2)}`} />
             <StatCard label="Count"   value={monthlyReport.expense_count} />
@@ -562,13 +504,11 @@ function ExpenseApp({ token, userEmail, onLogout }) {
           <div className="category-list">
             {Object.entries(monthlyReport.category_totals || {}).map(([cat, amt]) => {
               const meta = CATEGORY_META[cat] || CATEGORY_META["Other"];
-              const pct  = monthlyTotal > 0 ? (amt / monthlyTotal) * 100 : 0;
+              const pct  = budgetTotal > 0 ? (amt / budgetTotal) * 100 : 0;
               return (
                 <div key={cat} className={`cat-row ${meta.color}`}>
                   <span className="cat-row-label">{meta.icon} {cat}</span>
-                  <div className="cat-row-bar-wrap">
-                    <div className="cat-row-bar" style={{ width: `${pct}%` }} />
-                  </div>
+                  <div className="cat-row-bar-wrap"><div className="cat-row-bar" style={{ width: `${pct}%` }} /></div>
                   <span className="cat-row-amt">${Number(amt).toFixed(2)}</span>
                 </div>
               );
@@ -579,13 +519,8 @@ function ExpenseApp({ token, userEmail, onLogout }) {
 
       {activePanel === "search" && searchFilter && (
         <div className="panel">
-          <div className="panel-header">
-            <h3>🔍 Search Results</h3>
-            <button className="panel-close" onClick={() => setActivePanel(null)}>✕</button>
-          </div>
-          <p className="panel-meta">
-            <strong>{searchFilter.filtered_data?.length || 0}</strong> match{searchFilter.filtered_data?.length !== 1 ? "es" : ""} for "{searchTerm}"
-          </p>
+          <div className="panel-header"><h3>🔍 Search Results</h3><button className="panel-close" onClick={() => setActivePanel(null)}>✕</button></div>
+          <p className="panel-meta"><strong>{searchFilter.filtered_data?.length || 0}</strong> match{searchFilter.filtered_data?.length !== 1 ? "es" : ""} for "{searchTerm}"</p>
           {(searchFilter.filtered_data || []).length === 0 ? (
             <p className="empty-sub">No expenses match your search.</p>
           ) : (
@@ -605,7 +540,6 @@ function ExpenseApp({ token, userEmail, onLogout }) {
         </div>
       )}
 
-      {/* ── Total ── */}
       <div className="total-box">
         <span className="total-label">Total</span>
         <span className="total-amount">${total.toFixed(2)}</span>
