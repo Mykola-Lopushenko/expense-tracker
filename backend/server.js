@@ -23,17 +23,8 @@ mongoose
 // ── Models ────────────────────────────────────────────────
 const userSchema = new mongoose.Schema(
   {
-    email: {
-      type: String,
-      required: true,
-      unique: true,
-      lowercase: true,
-      trim: true,
-    },
-    password: {
-      type: String,
-      required: true,
-    },
+    email:    { type: String, required: true, unique: true, lowercase: true, trim: true },
+    password: { type: String, required: true },
   },
   { timestamps: true }
 );
@@ -42,15 +33,11 @@ const User = mongoose.model("User", userSchema);
 
 const expenseSchema = new mongoose.Schema(
   {
-    userId: {
-      type: mongoose.Schema.Types.ObjectId,
-      ref: "User",
-      required: true,
-    },
-    description: { type: String,  required: true },
-    amount:      { type: Number,  required: true },
-    category:    { type: String,  required: true },
-    date:        { type: Date,    default: Date.now },
+    userId:      { type: mongoose.Schema.Types.ObjectId, ref: "User", required: true },
+    description: { type: String, required: true },
+    amount:      { type: Number, required: true },
+    category:    { type: String, required: true },
+    date:        { type: Date,   default: Date.now },
   },
   { timestamps: true }
 );
@@ -66,29 +53,63 @@ const formatExpense = (expense) => ({
   date:        expense.date,
 });
 
-const getDateFilter = (period, selectedDate) => {
-  const now = selectedDate ? new Date(selectedDate) : new Date();
-  let startDate, endDate;
+/**
+ * Build a MongoDB date filter that respects the user's local timezone.
+ * tzOffset = client's getTimezoneOffset() in minutes (e.g. 420 for UTC-7).
+ * We shift UTC boundaries so "today" means today in the user's timezone.
+ */
+const getDateFilter = (period, selectedDate, tzOffset = 0) => {
+  // tzOffset from JS is positive when BEHIND UTC (e.g. LA = +420)
+  // We subtract it to convert local midnight → UTC
+  const offsetMs = tzOffset * 60 * 1000;
+
+  let startUTC, endUTC;
 
   if (period === "date" || period === "today") {
-    startDate = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-    endDate   = new Date(now.getFullYear(), now.getMonth(), now.getDate() + 1);
+    let baseDate;
+    if (selectedDate) {
+      // selectedDate is already local YYYY-MM-DD — parse as local midnight
+      const [y, m, d] = selectedDate.split("-").map(Number);
+      baseDate = new Date(Date.UTC(y, m - 1, d));
+    } else {
+      // Get today in user's local timezone
+      const nowLocal = new Date(Date.now() - offsetMs);
+      baseDate = new Date(Date.UTC(
+        nowLocal.getUTCFullYear(),
+        nowLocal.getUTCMonth(),
+        nowLocal.getUTCDate()
+      ));
+    }
+    // local midnight → UTC
+    startUTC = new Date(baseDate.getTime() + offsetMs);
+    endUTC   = new Date(startUTC.getTime() + 24 * 60 * 60 * 1000);
+
   } else if (period === "week") {
-    const diff = now.getDate() - now.getDay();
-    startDate  = new Date(now.getFullYear(), now.getMonth(), diff);
+    const nowLocal  = new Date(Date.now() - offsetMs);
+    const dayOfWeek = nowLocal.getUTCDay();
+    const monday    = new Date(Date.UTC(
+      nowLocal.getUTCFullYear(),
+      nowLocal.getUTCMonth(),
+      nowLocal.getUTCDate() - dayOfWeek
+    ));
+    startUTC = new Date(monday.getTime() + offsetMs);
+
   } else if (period === "month") {
-    startDate  = new Date(now.getFullYear(), now.getMonth(), 1);
+    const nowLocal = new Date(Date.now() - offsetMs);
+    const firstDay = new Date(Date.UTC(nowLocal.getUTCFullYear(), nowLocal.getUTCMonth(), 1));
+    startUTC = new Date(firstDay.getTime() + offsetMs);
+
   } else {
     return {};
   }
 
-  return endDate
-    ? { date: { $gte: startDate, $lt: endDate } }
-    : { date: { $gte: startDate } };
+  return endUTC
+    ? { date: { $gte: startUTC, $lt: endUTC } }
+    : { date: { $gte: startUTC } };
 };
 
-const getExpensesByPeriod = async (userId, period, selectedDate) => {
-  const filter = { userId, ...getDateFilter(period, selectedDate) };
+const getExpensesByPeriod = async (userId, period, selectedDate, tzOffset = 0) => {
+  const filter = { userId, ...getDateFilter(period, selectedDate, tzOffset) };
   return Expense.find(filter).sort({ date: -1 });
 };
 
@@ -98,7 +119,7 @@ const getExpenseStats = (expenses) => {
     return { totalSpending: 0, expenseCount: 0, averageExpense: 0,
              minimumExpense: 0, maximumExpense: 0, categoryTotals: {} };
   }
-  const totalSpending = amounts.reduce((s, a) => s + a, 0);
+  const totalSpending  = amounts.reduce((s, a) => s + a, 0);
   const categoryTotals = expenses.reduce((totals, e) => {
     const cat = e.category || "Other";
     totals[cat] = (totals[cat] || 0) + Number(e.amount);
@@ -146,29 +167,22 @@ const requireAuth = (req, res, next) => {
   }
 };
 
+// helper to parse tzOffset from query string
+const parseTz = (req) => parseInt(req.query.tzOffset || "0", 10);
+
 // ── Auth Routes ───────────────────────────────────────────
 app.get("/", (req, res) => res.send("Expense Tracker API is running"));
 
 app.post("/auth/register", async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
-    }
-    if (password.length < 8) {
-      return res.status(400).json({ error: "Password must be at least 8 characters" });
-    }
-
+    if (!email || !password)      return res.status(400).json({ error: "Email and password are required" });
+    if (password.length < 8)      return res.status(400).json({ error: "Password must be at least 8 characters" });
     const existing = await User.findOne({ email });
-    if (existing) {
-      return res.status(409).json({ error: "An account with this email already exists" });
-    }
-
+    if (existing)                 return res.status(409).json({ error: "An account with this email already exists" });
     const hashed = await bcrypt.hash(password, 12);
     const user   = await User.create({ email, password: hashed });
-
-    const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: "7d" });
+    const token  = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: "7d" });
     res.json({ token, email: user.email });
   } catch (error) {
     console.error("Register error:", error);
@@ -179,21 +193,11 @@ app.post("/auth/register", async (req, res) => {
 app.post("/auth/login", async (req, res) => {
   try {
     const { email, password } = req.body;
-
-    if (!email || !password) {
-      return res.status(400).json({ error: "Email and password are required" });
-    }
-
-    const user = await User.findOne({ email });
-    if (!user) {
-      return res.status(401).json({ error: "Invalid email or password" });
-    }
-
+    if (!email || !password) return res.status(400).json({ error: "Email and password are required" });
+    const user  = await User.findOne({ email });
+    if (!user)               return res.status(401).json({ error: "Invalid email or password" });
     const valid = await bcrypt.compare(password, user.password);
-    if (!valid) {
-      return res.status(401).json({ error: "Invalid email or password" });
-    }
-
+    if (!valid)              return res.status(401).json({ error: "Invalid email or password" });
     const token = jwt.sign({ userId: user._id }, JWT_SECRET, { expiresIn: "7d" });
     res.json({ token, email: user.email });
   } catch (error) {
@@ -205,9 +209,12 @@ app.post("/auth/login", async (req, res) => {
 // ── Expense Routes (all protected) ───────────────────────
 app.get("/expenses", requireAuth, async (req, res) => {
   try {
-    const period      = req.query.period || "all";
-    const selectedDate = req.query.date;
-    const expenses    = await getExpensesByPeriod(req.userId, period, selectedDate);
+    const expenses = await getExpensesByPeriod(
+      req.userId,
+      req.query.period || "all",
+      req.query.date,
+      parseTz(req)
+    );
     res.json(expenses.map(formatExpense));
   } catch (error) {
     res.status(500).json({ error: "Failed to get expenses", details: error.message });
@@ -217,9 +224,7 @@ app.get("/expenses", requireAuth, async (req, res) => {
 app.post("/expenses", requireAuth, async (req, res) => {
   try {
     const { description, amount, category, date } = req.body;
-    if (!description || !amount || !category) {
-      return res.status(400).json({ error: "Required fields missing" });
-    }
+    if (!description || !amount || !category) return res.status(400).json({ error: "Required fields missing" });
     const newExpense = await Expense.create({
       userId: req.userId,
       description,
@@ -238,7 +243,6 @@ app.put("/expenses/:id", requireAuth, async (req, res) => {
     const { description, amount, category, date } = req.body;
     const expense = await Expense.findOne({ _id: req.params.id, userId: req.userId });
     if (!expense) return res.status(404).json({ error: "Expense not found" });
-
     const updated = await Expense.findByIdAndUpdate(
       req.params.id,
       { description, amount: Number(amount), category, date: date || new Date() },
@@ -263,15 +267,11 @@ app.delete("/expenses/:id", requireAuth, async (req, res) => {
 
 app.get("/expenses/summary", requireAuth, async (req, res) => {
   try {
-    const expenses = await getExpensesByPeriod(req.userId, req.query.period || "all", req.query.date);
+    const expenses = await getExpensesByPeriod(req.userId, req.query.period || "all", req.query.date, parseTz(req));
     const stats    = getExpenseStats(expenses);
     res.json({
-      descriptive_statistics: {
-        amount: { mean: stats.averageExpense, min: stats.minimumExpense, max: stats.maximumExpense },
-      },
-      check_missing: {
-        amount: expenses.filter(e => e.amount == null).length,
-      },
+      descriptive_statistics: { amount: { mean: stats.averageExpense, min: stats.minimumExpense, max: stats.maximumExpense } },
+      check_missing: { amount: expenses.filter(e => e.amount == null).length },
     });
   } catch {
     res.status(500).json({ error: "Failed to get summary" });
@@ -280,7 +280,7 @@ app.get("/expenses/summary", requireAuth, async (req, res) => {
 
 app.get("/expenses/budget-alert", requireAuth, async (req, res) => {
   try {
-    const expenses = await getExpensesByPeriod(req.userId, req.query.period || "month", req.query.date);
+    const expenses = await getExpensesByPeriod(req.userId, req.query.period || "month", req.query.date, parseTz(req));
     const stats    = getExpenseStats(expenses);
     res.json(getBudgetAlertData(stats.totalSpending, Number(req.query.budget || MONTHLY_BUDGET)));
   } catch {
@@ -290,7 +290,7 @@ app.get("/expenses/budget-alert", requireAuth, async (req, res) => {
 
 app.get("/expenses/monthly-report", requireAuth, async (req, res) => {
   try {
-    const expenses = await getExpensesByPeriod(req.userId, req.query.period || "month", req.query.date);
+    const expenses = await getExpensesByPeriod(req.userId, req.query.period || "month", req.query.date, parseTz(req));
     const stats    = getExpenseStats(expenses);
     res.json({
       total_spending:  stats.totalSpending,
@@ -306,14 +306,12 @@ app.get("/expenses/monthly-report", requireAuth, async (req, res) => {
 app.get("/expenses/search-filter", requireAuth, async (req, res) => {
   try {
     const searchText = (req.query.search || "").toLowerCase();
-    const expenses   = await getExpensesByPeriod(req.userId, req.query.period || "all", req.query.date);
-    const filtered   = expenses
-      .map(formatExpense)
-      .filter(e =>
-        e.description.toLowerCase().includes(searchText) ||
-        e.category.toLowerCase().includes(searchText) ||
-        String(e.amount).includes(searchText)
-      );
+    const expenses   = await getExpensesByPeriod(req.userId, req.query.period || "all", req.query.date, parseTz(req));
+    const filtered   = expenses.map(formatExpense).filter(e =>
+      e.description.toLowerCase().includes(searchText) ||
+      e.category.toLowerCase().includes(searchText) ||
+      String(e.amount).includes(searchText)
+    );
     res.json({ filtered_data: filtered });
   } catch {
     res.status(500).json({ error: "Failed to search expenses" });
@@ -322,23 +320,24 @@ app.get("/expenses/search-filter", requireAuth, async (req, res) => {
 
 app.get("/expenses/dashboard", requireAuth, async (req, res) => {
   try {
+    const tz = parseTz(req);
     const [todayExp, weekExp, monthExp] = await Promise.all([
-      getExpensesByPeriod(req.userId, "today"),
-      getExpensesByPeriod(req.userId, "week"),
-      getExpensesByPeriod(req.userId, "month"),
+      getExpensesByPeriod(req.userId, "today", null, tz),
+      getExpensesByPeriod(req.userId, "week",  null, tz),
+      getExpensesByPeriod(req.userId, "month", null, tz),
     ]);
     const monthStats  = getExpenseStats(monthExp);
     const budgetAlert = getBudgetAlertData(monthStats.totalSpending, MONTHLY_BUDGET);
     const topCategory = Object.entries(monthStats.categoryTotals).sort((a, b) => b[1] - a[1])[0];
     res.json({
-      monthly_budget:           MONTHLY_BUDGET,
-      today_total:              getExpenseStats(todayExp).totalSpending,
-      week_total:               getExpenseStats(weekExp).totalSpending,
-      month_total:              monthStats.totalSpending,
-      month_remaining:          budgetAlert.remaining,
-      month_transaction_count:  monthStats.expenseCount,
-      top_category:             topCategory ? { category: topCategory[0], amount: topCategory[1] } : null,
-      category_totals:          monthStats.categoryTotals,
+      monthly_budget:          MONTHLY_BUDGET,
+      today_total:             getExpenseStats(todayExp).totalSpending,
+      week_total:              getExpenseStats(weekExp).totalSpending,
+      month_total:             monthStats.totalSpending,
+      month_remaining:         budgetAlert.remaining,
+      month_transaction_count: monthStats.expenseCount,
+      top_category:            topCategory ? { category: topCategory[0], amount: topCategory[1] } : null,
+      category_totals:         monthStats.categoryTotals,
     });
   } catch {
     res.status(500).json({ error: "Failed to get dashboard" });
@@ -347,3 +346,4 @@ app.get("/expenses/dashboard", requireAuth, async (req, res) => {
 
 const PORT = process.env.PORT || 5000;
 app.listen(PORT, () => console.log(`Server running on http://localhost:${PORT}`));
+
