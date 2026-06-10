@@ -16,6 +16,8 @@ A full-stack expense tracking web application built with React and Node.js. User
 - **Category breakdown** — Color-coded by Food, Groceries, Transport, and Other.
 - **Data insights** — On-demand summary statistics, budget alert, monthly report, and keyword search.
 - **Responsive design** — Works on desktop and mobile with a collapsible filter menu.
+- **Budget settings** — Set a custom budget amount and choose weekly or monthly tracking. Settings persist across sessions.
+- **Timezone-aware filtering** — Expenses are filtered by your local timezone, so "Today" always shows the correct local date.
 
 ---
 
