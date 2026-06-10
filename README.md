@@ -4,6 +4,16 @@ A full-stack expense tracking web application built with React and Node.js. User
 
 **Live demo:** https://expense-tracker-app-d1em.onrender.com/
 
+<img width="582" height="668" alt="login" src="https://github.com/user-attachments/assets/bf380904-a4c9-48ea-84bb-de939a2622d1" />
+
+<img width="1012" height="838" alt="dashboard" src="https://github.com/user-attachments/assets/a08e2537-0f72-4fa7-8191-27d3de62dc5f" />
+
+<img width="429" height="412" alt="budget settings" src="https://github.com/user-attachments/assets/085ad370-66dd-4714-a6da-a78ecc171ed3" />
+
+<img width="810" height="818" alt="expenses info" src="https://github.com/user-attachments/assets/65af0e96-3781-40b2-be39-23856fe9a547" />
+
+
+
 ---
 
 ## Features
